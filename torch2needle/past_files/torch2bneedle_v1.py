@@ -1,3 +1,6 @@
+import sys, os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 from needle.nn.nn_basic import Identity, Linear, Flatten, ReLU, Sequential, BatchNorm1d, LayerNorm1d, Dropout, Residual, SoftmaxLoss
 from needle import Tensor
 
@@ -11,14 +14,20 @@ import random
 class TorchMLP(nn.Module):
     def __init__(self, input_dim=10, hidden_dim=5, output_dim=1):
         super().__init__()
-        self.net = nn.Sequential(
+        self.net1 = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
             nn.ReLU(),
-            # nn.Dropout(0.2),
+            nn.Dropout(0.2),
+            nn.Linear(hidden_dim, output_dim)
+        )
+        self.net2 = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(0.2),
             nn.Linear(hidden_dim, output_dim)
         )
     def forward(self, x):
-        return self.net(x)
+        return self.net1(x) + self.net2(x)
 
 
 def torch2needle(torch_model):
@@ -106,7 +115,7 @@ random.seed(seed)
 
 
 # 1. 构建模型
-torch_model = TorchMLP()
+torch_model = TorchMLP().eval()
 needle_model = torch2needle(torch_model)
 
 # 2. 加载权重
