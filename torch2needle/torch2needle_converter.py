@@ -28,10 +28,13 @@ def torch2needle_fx(torch_model):
     named_modules = dict(traced.named_modules())
     node_to_layer = {}
 
-    output_node = list(traced.graph.nodes)[-1]
-    needle_model, trace_log = convert_node(output_node, named_modules, node_to_layer)
+    # this is used for weight converter
+    torch_mapping_needle = {}
 
-    return needle_model, trace_log
+    output_node = list(traced.graph.nodes)[-1]
+    needle_model, trace_log = convert_node(output_node, named_modules, node_to_layer, torch_mapping_needle)
+
+    return needle_model, trace_log, torch_mapping_needle
 
 # convert Linear Layers/CNN layers and so on
 def convert_layer(layer):
@@ -57,7 +60,7 @@ def convert_layer(layer):
         raise NotImplementedError
 
 # convert ADD/SUB and so on
-def convert_function_node(node, named_modules, node_to_layer, depth, trace_log):
+def convert_function_node(node, named_modules, node_to_layer, torch_mapping_needle, depth, trace_log):
     """
     处理 FX 中的 call_function 类型节点，支持常见算子：
       - 加法 (operator.add)
@@ -72,16 +75,16 @@ def convert_function_node(node, named_modules, node_to_layer, depth, trace_log):
 
 
     if op == operator.add:
-        left, trace_log = convert_node(node.args[0], named_modules, node_to_layer,
+        left, trace_log = convert_node(node.args[0], named_modules, node_to_layer, torch_mapping_needle,
                                        depth + 1, parent=node.name, trace_log=trace_log)
-        right, trace_log = convert_node(node.args[1], named_modules, node_to_layer,
+        right, trace_log = convert_node(node.args[1], named_modules, node_to_layer, torch_mapping_needle,
                                         depth + 1, parent=node.name, trace_log=trace_log)
         module = ADD(left, right)
         note = "operator.add"
     elif op == operator.sub:
-        left, trace_log = convert_node(node.args[0], named_modules, node_to_layer,
+        left, trace_log = convert_node(node.args[0], named_modules, node_to_layer, torch_mapping_needle,
                                        depth + 1, parent=node.name, trace_log=trace_log)
-        right, trace_log = convert_node(node.args[1], named_modules, node_to_layer,
+        right, trace_log = convert_node(node.args[1], named_modules, node_to_layer, torch_mapping_needle,
                                         depth + 1, parent=node.name, trace_log=trace_log)
         module = SUB(left, right)
         note = "operator.sub"
@@ -112,7 +115,7 @@ def convert_function_node(node, named_modules, node_to_layer, depth, trace_log):
     return module, note, trace_log
 
 # main Torch2Needle converter
-def convert_node(node, named_modules, node_to_layer, depth=0, parent=None, trace_log=None):
+def convert_node(node, named_modules, node_to_layer, torch_mapping_needle, depth=0, parent=None, trace_log=None):
     if trace_log is None:
         trace_log = []
 
@@ -152,13 +155,15 @@ def convert_node(node, named_modules, node_to_layer, depth=0, parent=None, trace
         submodules = []
         for arg in node.all_input_nodes:
             if arg.op != "placeholder":  # 非输入层
-                sub_module, trace_log = convert_node(arg, named_modules, node_to_layer,
+                sub_module, trace_log = convert_node(arg, named_modules, node_to_layer, torch_mapping_needle,
                                                      depth + 1, parent=node.name, trace_log=trace_log)
                 submodules.append(sub_module)
 
         # 转换当前层
         module = convert_layer(torch_layer)
         entry["needle_type"] = type(module).__name__
+
+        torch_mapping_needle[torch_layer] = module
 
         # ✅ 如果有输入子模块，则把它们组合成 Sequential
         if submodules:
@@ -171,7 +176,7 @@ def convert_node(node, named_modules, node_to_layer, depth=0, parent=None, trace
     elif node.op == "call_function":
         entry["module_type"] = "function"
         module, note, trace_log = convert_function_node(
-            node, named_modules, node_to_layer, depth, trace_log
+            node, named_modules, node_to_layer, torch_mapping_needle, depth, trace_log
         )
         entry["needle_type"] = type(module).__name__
         entry["note"] = note
@@ -183,13 +188,13 @@ def convert_node(node, named_modules, node_to_layer, depth=0, parent=None, trace
         while isinstance(real_output, (tuple, list)) and len(real_output) == 1:
             real_output = real_output[0]
         if isinstance(real_output, torch.fx.Node):
-            module, trace_log = convert_node(real_output, named_modules, node_to_layer,
+            module, trace_log = convert_node(real_output, named_modules, node_to_layer, torch_mapping_needle,
                                              depth + 1, parent=node.name, trace_log=trace_log)
             entry["needle_type"] = type(module).__name__
         elif isinstance(real_output, (tuple, list)) and all(isinstance(n, torch.fx.Node) for n in real_output):
             modules = []
             for n in real_output:
-                sub_module, trace_log = convert_node(n, named_modules, node_to_layer,
+                sub_module, trace_log = convert_node(n, named_modules, node_to_layer, torch_mapping_needle,
                                                      depth + 1, parent=node.name, trace_log=trace_log)
                 modules.append(sub_module)
             module = Sequential(*modules)
@@ -212,10 +217,14 @@ def convert_node(node, named_modules, node_to_layer, depth=0, parent=None, trace
 if __name__ == "__main__":
     print("this is test for torch2needle converter")
     torch_model = TorchMLP_v2()
-    needle_model, trace_log = torch2needle_fx(torch_model)
-    print("======== Torch File =========")
+    needle_model, trace_log, torch_mapping_needle = torch2needle_fx(torch_model)
+    print("======== Torch Structure =========")
     print(torch_model)
-    print("======== Needle File ========")
+    print("======== Needle Model Structure ========")
     print(needle_model)
+    print("======== Needle print_trace_grouped ========")
     print_trace_grouped(trace_log)
+    print("======== Torch Mapping Needle ========")
+    print(torch_mapping_needle)
+    print(len(torch_mapping_needle))
 
