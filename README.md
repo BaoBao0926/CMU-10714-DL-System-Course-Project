@@ -17,3 +17,51 @@ conda activate torch2needle
 # install requirement
 pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu126
 ```
+
+## Torch2Needle
+
+```text
+torch2needle/
+│
+├── torch2needle_converter.py # define how to convert a PyTorch-based model into Needle-based model
+├── weight_converter.py       # define how to load PyTorch weight into Needle model
+├── utils.py                  # useful tools
+└── torch_models.py           # torch-based models
+```
+
+If you want to add one more operator, you should add:
+
+- (1) torch2needle/torch2needle_converter.py:
+  - convert_layer(): you need add one more elif isinstance(layer, nn.*)
+  - convert_function_node(): you need add one more elif op == operator.*
+- (2) needle/nn/nn_basic.py:
+  - you need add the code for new layers and operators
+- (3) torch2needle/weight_converter.py:
+  - load_torch_weights_by_mapping(): add the code to copy weight for each layer
+
+
+
+## Operaor Fusion
+
+```text
+torch2needle/
+│
+├── .py # define how to convert a PyTorch-based model into Needle-based model
+├── .py       # define how to load PyTorch weight into Needle model
+├── .py                  # useful tools
+└── .py           # torch-based models
+```
+
+If you want to add one more fused operator, you should add:
+
+- (1) operator_layer.py:
+  - you need add fused operator here
+- (2) needle/ops/ops_fused.py
+  - add fused ope here
+- (3) operator_fusion.py
+  - in starter function fuse_operator(), add new fused operator into patterns = []
+
+
+
+
+
