@@ -66,7 +66,12 @@ If you want to add one more fused operator, you should add:
 - (4) operator_fusion/operator_fusion.py
   - in starter function fuse_operator(), add new fused operator into `patterns = []`
 
+**TODO**:
+  - @shuaiwei, write C++ code for each fusd operator
+ 
+## Optimization on AMD GPU
 
-
+**TODO**:
+  - @shuaiwei, good luck to you
 
 
