@@ -1,7 +1,3 @@
-"""
-我现在想实现CMU的DL system的一个功能，给一个torch model，直接根据计算图转成needl的mdoel
-"""
-
 import sys, os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -35,10 +31,10 @@ def torch2needle_fx(torch_model):
     output_node = list(traced.graph.nodes)[-1]
     _, trace_log = convert_node(output_node, named_modules, node_to_layer, torch_mapping_needle)
 
-    # 补充 Sequential 模块到 mapping（用于权重加载时的完整性）
+    # supplement Sequential modules to mapping (for weight loading integrity)
     populate_sequential_mapping(torch_model, named_modules, torch_mapping_needle)
 
-    # 构建可执行的 Needle 模型
+    # construct executable Needle model
     needle_model = build_executable_model(torch_model, traced.graph, node_to_layer, torch_mapping_needle)
 
     return needle_model, trace_log, torch_mapping_needle
@@ -64,10 +60,44 @@ def build_executable_model(torch_model, fx_graph, node_to_layer, torch_mapping_n
             self.fx_graph = fx_graph
             self.node_to_layer = node_to_layer
             
+            # 创建从 layer 到 node_name 的反向映射，用于打印时显示引用
+            # 使用 _ 前缀使其在打印时被忽略
+            self._layer_to_name = {}
+            
             # 将所有层作为属性存储，以便 parameters() 可以找到它们
             for i, (node_name, layer) in enumerate(node_to_layer.items()):
                 if not isinstance(layer, Identity):
-                    setattr(self, f"layer_{i}", layer)
+                    layer_name = f"layer_{i}"
+                    setattr(self, layer_name, layer)
+                    self._layer_to_name[id(layer)] = layer_name
+        
+        def __repr__(self):
+            """自定义打印格式，显示 ADD/SUB 的 left/right 引用"""
+            lines = ["FXGraphExecutor("]
+            
+            for attr_name in sorted(dir(self)):
+                if attr_name.startswith('layer_'):
+                    layer = getattr(self, attr_name)
+                    layer_repr = self._format_layer(layer, indent=1)
+                    lines.append(f"  ({attr_name}): {layer_repr}")
+            
+            lines.append(")")
+            return "\n".join(lines)
+        
+        def _format_layer(self, layer, indent=0):
+            """格式化单个层的表示，处理 ADD/SUB 的引用"""
+            pad = "  " * indent
+            
+            if isinstance(layer, (ADD, SUB)):
+                # 对于 ADD/SUB，显示 left/right 是哪个 layer
+                op_name = type(layer).__name__
+                left_ref = self._layer_to_name.get(id(layer.left), repr(layer.left))
+                right_ref = self._layer_to_name.get(id(layer.right), repr(layer.right))
+                
+                return f"{op_name}(left={left_ref}, right={right_ref})"
+            else:
+                # 其他层直接使用其默认表示
+                return repr(layer).replace('\n', '\n' + pad)
         
         def forward(self, *args):
             # 执行 FX 图
@@ -119,52 +149,52 @@ def build_executable_model(torch_model, fx_graph, node_to_layer, torch_mapping_n
 
 def populate_sequential_mapping(torch_model, named_modules, torch_mapping_needle):
     """
-    遍历 PyTorch 模型，将所有 Sequential 模块添加到 torch_mapping_needle
-    这样 weight_converter 可以看到完整的映射表（虽然 Sequential 本身不会被加载权重）
+    iterate PyTorch model, add all Sequential modules to torch_mapping_needle
+    so that weight_converter can see the complete mapping table (although Sequential itself will not load weights)
     """
     for name, module in torch_model.named_modules():
         if isinstance(module, nn.Sequential) and module not in torch_mapping_needle:
-            # 构建对应的 Needle Sequential
+            # Construct the corresponding Needle Sequential
             needle_modules = []
             for sub_module in module:
                 if sub_module in torch_mapping_needle:
                     needle_modules.append(torch_mapping_needle[sub_module])
                 else:
-                    # 如果子模块还没转换，跳过（理论上不应该发生）
+                    # If the submodule has not been converted yet, skip (theoretically should not happen)
                     pass
             
-            if needle_modules:  # 只有当有子模块时才创建 Sequential
+            if needle_modules:  # Only create Sequential if there are submodules
                 needle_seq = Sequential(*needle_modules)
                 torch_mapping_needle[module] = needle_seq
 
 
 def build_model_structure(torch_model, named_modules, torch_mapping_needle):
     """
-    根据 PyTorch 模型的原始结构构建 Needle 模型
-    保持 Sequential 等结构与原始模型一致
+    according to Pytroch model structure, build Needle model
+    keep Sequential etc structure consistent with original model
     """
-    # 如果整个模型就是一个 Sequential
+    # if the whole model is a Sequential
     if isinstance(torch_model, nn.Sequential):
         needle_modules = []
         for torch_module in torch_model:
             if torch_module in torch_mapping_needle:
                 needle_modules.append(torch_mapping_needle[torch_module])
             else:
-                # 递归转换子模块
+                # Recursively convert submodules
                 needle_modules.append(build_model_structure(torch_module, named_modules, torch_mapping_needle))
         needle_seq = Sequential(*needle_modules)
-        # 将 Sequential 本身也添加到映射中
+        # Add the Sequential itself to the mapping
         torch_mapping_needle[torch_model] = needle_seq
         return needle_seq
     
-    # 如果只有一个子模块，直接返回转换后的模块
+    # If there is only one child module, directly return the converted module
     children_list = list(torch_model.children())
     if len(children_list) == 1:
         child = children_list[0]
         if child in torch_mapping_needle:
             return torch_mapping_needle[child]
         elif isinstance(child, nn.Sequential):
-            # 转换 Sequential
+            # Convert Sequential
             needle_modules = []
             for sub_module in child:
                 if sub_module in torch_mapping_needle:
@@ -177,47 +207,47 @@ def build_model_structure(torch_model, named_modules, torch_mapping_needle):
             torch_mapping_needle[child] = needle_seq
             return needle_seq
         else:
-            # 单个普通层
+            # Single ordinary layer
             needle_module = convert_layer(child)
             torch_mapping_needle[child] = needle_module
             return needle_module
     
-    # 如果模型有多个命名的子模块
-    # 创建一个包装模块来保持结构
+    # If the model has multiple named child modules
+    # Create a wrapper module to maintain structure
     class NeedleModelWrapper(Module):
         def __init__(self, graph_module):
             super().__init__()
             self.graph_module = graph_module
-            # 遍历 PyTorch 模型的所有子模块
+            # Iterate over all child modules of the PyTorch model
             for name, torch_module in torch_model.named_children():
                 if torch_module in torch_mapping_needle:
-                    # 直接使用已转换的模块
+                    # Directly use the already converted module
                     setattr(self, name, torch_mapping_needle[torch_module])
                 elif isinstance(torch_module, nn.Sequential):
-                    # Sequential 需要递归转换
+                    # Sequential needs to be recursively converted
                     needle_seq_modules = []
                     for sub_module in torch_module:
                         if sub_module in torch_mapping_needle:
                             needle_seq_modules.append(torch_mapping_needle[sub_module])
                         else:
-                            # 转换并添加到映射
+                            # Convert and add to mapping
                             needle_sub = convert_layer(sub_module)
                             torch_mapping_needle[sub_module] = needle_sub
                             needle_seq_modules.append(needle_sub)
                     needle_sequential = Sequential(*needle_seq_modules)
-                    # 将 Sequential 本身也添加到映射中
+                    # Add the Sequential itself to the mapping
                     torch_mapping_needle[torch_module] = needle_sequential
                     setattr(self, name, needle_sequential)
                 else:
-                    # 其他类型的模块：转换并添加到映射
+                    # Other types of modules: convert and add to mapping
                     needle_module = convert_layer(torch_module)
                     torch_mapping_needle[torch_module] = needle_module
                     setattr(self, name, needle_module)
         
         def forward(self, x):
-            # 这个 forward 不能通用实现，因为不同模型有不同的计算图
-            # 实际上对于多模块的模型，应该使用 FX 图来执行
-            # 这里抛出错误，提示用户不应该直接调用包装器的 forward
+            # This forward cannot be generally implemented because different models have different computation graphs
+            # Actually, for multi-module models, FX graph execution should be used
+            # Here, raise an error to indicate that the wrapper's forward should not be called directly
             raise NotImplementedError(
                 "NeedleModelWrapper is a structural wrapper and should not be called directly. "
                 "The converted model should use the FX graph execution path."
@@ -227,7 +257,7 @@ def build_model_structure(torch_model, named_modules, torch_mapping_needle):
 
 # convert Linear Layers/CNN layers and so on
 def convert_layer(layer):
-    """把单个 PyTorch 层转成 Needle 层"""
+    """transform a single PyTorch layer into Needle layer"""
     if isinstance(layer, nn.Linear):
         return Linear(layer.in_features, layer.out_features)
     elif isinstance(layer, nn.ReLU):
@@ -251,14 +281,14 @@ def convert_layer(layer):
 # convert ADD/SUB and so on
 def convert_function_node(node, named_modules, node_to_layer, torch_mapping_needle, depth, trace_log):
     """
-    处理 FX 中的 call_function 类型节点，支持常见算子：
-      - 加法 (operator.add)
-      - 减法 (operator.sub)
-      - 乘法 (operator.mul)
-      - 除法 (operator.truediv)
+    deal with call_function nodes:
+      - operator.add
+      - operator.sub)
+      - operator.mul
+      - operator.truediv
       - flatten (torch.flatten)
-      - 其它默认 Identity
-    返回: (needle_module, note_string)
+      - Identity
+    return: (needle_module, note_string)
     """
     op = node.target
 
@@ -340,18 +370,18 @@ def convert_node(node, named_modules, node_to_layer, torch_mapping_needle, depth
         torch_layer = named_modules[target]
         entry["module_type"] = type(torch_layer).__name__
 
-        # 先确保所有输入节点都已转换（但不组合它们）
+        # ensure all input nodes are converted first (but not combined)
         for arg in node.all_input_nodes:
             if arg.name not in node_to_layer and arg.op != "placeholder":
                 _, trace_log = convert_node(arg, named_modules, node_to_layer, torch_mapping_needle,
                                            depth + 1, parent=node.name, trace_log=trace_log)
 
-        # 检查是否已经转换过这个 PyTorch 层（重用同一个 Needle 模块）
+        # check if this PyTorch layer has been converted before (reuse the same Needle module)
         if torch_layer in torch_mapping_needle:
             module = torch_mapping_needle[torch_layer]
             entry["note"] = "reusing existing needle module"
         else:
-            # 转换当前层
+            # transform current layer
             module = convert_layer(torch_layer)
             torch_mapping_needle[torch_layer] = module
         
@@ -409,7 +439,7 @@ if __name__ == "__main__":
     print(needle_model)
     print("======== Needle print_trace_grouped ========")
     print_trace_grouped(trace_log)
-    print("======== Torch Mapping Needle ========")
+    print("======== Torch Mapping Needle ========\r")
     print(torch_mapping_needle)
     print(len(torch_mapping_needle))
 

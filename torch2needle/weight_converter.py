@@ -11,18 +11,17 @@ from torch2needle_converter import *
 
 def load_torch_weights_by_mapping(layer_mapping, verbose=True):
     """
-    根据 torch→needle 映射表复制权重
+    according to torch→needle mapping copy weights
     """
     copied = 0
     skipped = 0
     
     for torch_layer, needle_layer in layer_mapping.items():
         try:
-            # 跳过 Sequential（它本身没有权重）
+            # Jump Sequential (it has no weights itself)
             if isinstance(torch_layer, nn.Sequential):
                 skipped += 1
                 continue
-            
             # === Linear ===
             if isinstance(torch_layer, nn.Linear) and isinstance(needle_layer, Linear):
                 needle_layer.weight.cached_data = np.reshape(
@@ -36,7 +35,6 @@ def load_torch_weights_by_mapping(layer_mapping, verbose=True):
                     )
                 if verbose: print(f"[✔] Copied Linear({torch_layer.in_features}, {torch_layer.out_features})")
                 copied += 1
-
             # === BatchNorm1d ===
             elif isinstance(torch_layer, nn.BatchNorm1d) and isinstance(needle_layer, BatchNorm1d):
                 needle_layer.weight.cached_data = Tensor(torch_layer.weight.detach().numpy())
@@ -45,13 +43,14 @@ def load_torch_weights_by_mapping(layer_mapping, verbose=True):
                 needle_layer.running_var = Tensor(torch_layer.running_var.detach().numpy())
                 if verbose: print(f"[✔] Copied BatchNorm1d({torch_layer.num_features})")
                 copied += 1
-
             # === LayerNorm ===
             elif isinstance(torch_layer, nn.LayerNorm) and isinstance(needle_layer, LayerNorm1d):
                 needle_layer.weight.cached_data = Tensor(torch_layer.weight.detach().numpy())
                 needle_layer.bias.cached_data = Tensor(torch_layer.bias.detach().numpy())
                 if verbose: print(f"[✔] Copied LayerNorm1d({torch_layer.normalized_shape})")
                 copied += 1
+            
+            # TODO: we should add more layers here in the future
 
             else:
                 if verbose:
