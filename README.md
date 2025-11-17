@@ -32,34 +32,39 @@ torch2needle/
 If you want to add one more operator, you should add:
 
 - (1) torch2needle/torch2needle_converter.py:
-  - convert_layer(): you need add one more elif isinstance(layer, nn.*)
-  - convert_function_node(): you need add one more elif op == operator.*
+  - `convert_layer()`: you need add one more elif isinstance(layer, nn.*)
+  - `convert_function_node()`: you need add one more elif op == operator.*
 - (2) needle/nn/nn_basic.py:
   - you need add the code for new layers and operators
 - (3) torch2needle/weight_converter.py:
-  - load_torch_weights_by_mapping(): add the code to copy weight for each layer
+  - `load_torch_weights_by_mapping()`: add the code to copy weight for each layer
 
 
 
 ## Operaor Fusion
 
 ```text
-torch2needle/
+operator_fusion/
 │
-├── .py # define how to convert a PyTorch-based model into Needle-based model
-├── .py       # define how to load PyTorch weight into Needle model
-├── .py                  # useful tools
-└── .py           # torch-based models
+├── operator_fusion.py   # main function of operator fusion.fuse_operators() is main function 
+├── fusion_pattern.py    # define the pattern of each fused operation
+└── fused_layer.py       # define the fused layer
+
+needle/ops
+└── ops_fused.py         # defien the fused ops, which should be replaced into C++
+
 ```
 
 If you want to add one more fused operator, you should add:
 
-- (1) operator_layer.py:
+- (1) operator_fusion/operator_layer.py:
   - you need add fused operator here
 - (2) needle/ops/ops_fused.py
   - add fused ope here
-- (3) operator_fusion.py
-  - in starter function fuse_operator(), add new fused operator into patterns = []
+- (3) operator_fusion/fusion_pattern.py:
+  - add new fusion pattern here
+- (4) operator_fusion/operator_fusion.py
+  - in starter function fuse_operator(), add new fused operator into `patterns = []`
 
 
 
