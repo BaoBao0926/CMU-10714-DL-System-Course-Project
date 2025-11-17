@@ -14,8 +14,15 @@ def load_torch_weights_by_mapping(layer_mapping, verbose=True):
     根据 torch→needle 映射表复制权重
     """
     copied = 0
+    skipped = 0
+    
     for torch_layer, needle_layer in layer_mapping.items():
         try:
+            # 跳过 Sequential（它本身没有权重）
+            if isinstance(torch_layer, nn.Sequential):
+                skipped += 1
+                continue
+            
             # === Linear ===
             if isinstance(torch_layer, nn.Linear) and isinstance(needle_layer, Linear):
                 needle_layer.weight.cached_data = np.reshape(
@@ -27,6 +34,7 @@ def load_torch_weights_by_mapping(layer_mapping, verbose=True):
                         torch_layer.bias.detach().cpu().numpy().astype(np.float32),
                         (torch_layer.out_features,)
                     )
+                if verbose: print(f"[✔] Copied Linear({torch_layer.in_features}, {torch_layer.out_features})")
                 copied += 1
 
             # === BatchNorm1d ===
@@ -47,13 +55,14 @@ def load_torch_weights_by_mapping(layer_mapping, verbose=True):
 
             else:
                 if verbose:
-                    print(f"[skip] Unsupported mapping: {type(torch_layer).__name__} → {type(needle_layer).__name__}")
+                    print(f"[⚠] Unsupported mapping: {type(torch_layer).__name__} → {type(needle_layer).__name__}")
+                skipped += 1
 
         except Exception as e:
-            print(f"[error] {type(torch_layer).__name__} → {type(needle_layer).__name__}: {e}")
+            print(f"[❌] Error copying {type(torch_layer).__name__} → {type(needle_layer).__name__}: {e}")
 
     if verbose:
-        print(f"\n✅ Successfully copied {copied}/{len(layer_mapping)} layers.")
+        print(f"\n✅ Successfully copied {copied}/{len(layer_mapping)} layers ({skipped} skipped).")
     return layer_mapping
 
 

@@ -81,23 +81,36 @@ class Module:
         child_lines = []
 
         for name, value in self.__dict__.items():
+            # 跳过私有属性和参数
+            if name.startswith('_') or isinstance(value, Parameter):
+                continue
             # 递归打印子模块
             if isinstance(value, Module):
                 sub_repr = value.__repr__(indent + 1)
                 child_lines.append(f"{pad}  ({name}): {sub_repr}")
             # 递归打印模块列表或元组
-            elif isinstance(value, (list, tuple)) and all(isinstance(x, Module) for x in value):
+            elif isinstance(value, (list, tuple)) and len(value) > 0 and all(isinstance(x, Module) for x in value):
                 for i, x in enumerate(value):
                     sub_repr = x.__repr__(indent + 1)
                     child_lines.append(f"{pad}  ({name}.{i}): {sub_repr}")
 
         # === Base Case ===
         if not child_lines:
-            # 如果底层模块（比如 Linear），让它的 repr 更紧凑
-            base_repr = getattr(super(type(self), self), "__repr__", None)
-            if callable(base_repr) and base_repr.__qualname__.split(".")[0] != "object":
-                # 若父类自定义了 repr（比如 Linear 自己打印 in_features 等）
-                return f"{self.__class__.__name__}{base_repr(self)}"
+            # 构建参数信息用于显示
+            params = []
+            if hasattr(self, 'in_features') and hasattr(self, 'out_features'):
+                params.append(f"in_features={self.in_features}, out_features={self.out_features}")
+                if hasattr(self, 'bias'):
+                    params.append(f"bias={self.bias is not None}")
+            elif hasattr(self, 'dim'):
+                params.append(f"dim={self.dim}")
+                if hasattr(self, 'eps'):
+                    params.append(f"eps={self.eps}")
+            elif hasattr(self, 'p') and hasattr(self, '__class__') and 'Dropout' in self.__class__.__name__:
+                params.append(f"p={self.p}")
+            
+            if params:
+                return f"{self.__class__.__name__}({', '.join(params)})"
             else:
                 return f"{self.__class__.__name__}()"
 
@@ -170,7 +183,6 @@ class SoftmaxLoss(Module):
       return summation(loss) / logits.shape[0]
 
 
-
 class BatchNorm1d(Module):
     def __init__(self, dim: int, eps: float = 1e-5, momentum: float = 0.1, device: Any | None = None, dtype: str = "float32") -> None:
       super().__init__()
@@ -207,10 +219,6 @@ class BatchNorm1d(Module):
       bias_broadcast   = broadcast_to(reshape(self.bias, (1, self.dim)), x_hat.shape)    # (N, C)
       out = weight_broadcast * x_hat + bias_broadcast
       return out
-
-
-
-
 
 
 class LayerNorm1d(Module):

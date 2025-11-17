@@ -25,6 +25,7 @@ class TorchMLP_v2(nn.Module):
         )
         self.net3 = nn.Linear(output_dim, output_dim)
 
+
     def forward(self, x):
         x = self.net(self.net1(x) + self.net2(x) + self.net1(x))
         x = x - self.net3(x)
