@@ -4,44 +4,45 @@ import sys, os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 def print_trace_grouped(trace_log):
-    """print treee trace"""
-    children_map = {}
-    for entry in trace_log:
-        parent = entry.get("parent")
-        children_map.setdefault(parent, []).append(entry)
-
-    def _group_by_prefix(nodes):
-        grouped = {}
-        for node in nodes:
-            prefix = node["name"].split(".")[0]  # e.g., net1 from net1.0
-            grouped.setdefault(prefix, []).append(node)
-        return grouped
-
-    def _print_subtree(parent=None, indent=0):
-        nodes = children_map.get(parent, [])
-        grouped = _group_by_prefix(nodes)
-        pad = "  " * indent
-
-        for group, members in grouped.items():
-            if len(members) > 1:
-                print(f"{pad}• {group} (Sequential)")
-                for node in members:
-                    print(f"{pad}  ├─ {node['name']} → {node['module_type']}")
-            else:
-                node = members[0]
-                name = node["name"]
-                op = node["op"]
-                module = node["module_type"]
-                needle = node["needle_type"]
-                note = f"  # {node['note']}" if node["note"] else ""
-                # print(f"{pad}• {name} ({op}) → {module} → {needle}{note}")
-                print(f"{pad}• {name} ({op}) → {needle}{note}")
-
-            # print sub_node
-            for node in members:
-                _print_subtree(node["name"], indent + 2)
-
-    print("========Grouped Tree View ========")
-    _print_subtree(None)
-    print("========================================")
+    """
+    按顺序打印转换追踪，展示每一层的转换过程
+    """
+    print("\n" + "="*100)
+    print("📊 TORCH → NEEDLE 转换追踪 (按执行顺序)")
+    print("="*100)
+    print(f"{'序号':<6} {'节点名称':<20} {'操作类型':<15} {'PyTorch类型':<20} {'→':<3} {'Needle类型':<20} {'备注'}")
+    print("-"*100)
+    
+    for idx, entry in enumerate(trace_log, 1):
+        name = entry.get('name', '')
+        op = entry.get('op', '')
+        torch_type = entry.get('module_type', '') or ''
+        needle_type = entry.get('needle_type', '') or ''
+        note = entry.get('note', '')
+        
+        # 根据操作类型添加符号
+        if op == 'placeholder':
+            symbol = "🔵"
+        elif op == 'call_module':
+            symbol = "🟢"
+        elif op == 'call_function':
+            symbol = "🟡"
+        elif op == 'output':
+            symbol = "🔴"
+        else:
+            symbol = "⚪"
+        
+        # 打印每一行
+        print(f"{idx:<6} {symbol} {name:<18} {op:<15} {torch_type:<20} → {needle_type:<20} {note}")
+    
+    print("="*100)
+    
+    # 统计信息
+    total = len(trace_log)
+    modules = sum(1 for e in trace_log if e['op'] == 'call_module')
+    functions = sum(1 for e in trace_log if e['op'] == 'call_function')
+    
+    print(f"\n📈 统计: 总共 {total} 个节点 | {modules} 个模块 | {functions} 个函数操作")
+    print(f"图例: 🔵 输入 | 🟢 模块 | 🟡 函数 | 🔴 输出")
+    print("="*100 + "\n")
 
