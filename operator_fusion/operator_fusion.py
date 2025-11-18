@@ -28,10 +28,14 @@ from needle.nn.nn_basic import (
 )
 from typing import Any, List, Tuple, Optional
 
-from operator_fusion.fusion_pattrern import (
-    FusionPattern, LinearReLUPattern, LinearBatchNormPattern, BatchNormReLUPattern, LinearBatchNormReLUPattern
-)
-
+try:
+    from fusion_pattrern import (
+        FusionPattern, LinearReLUPattern, LinearBatchNormPattern, BatchNormReLUPattern, LinearBatchNormReLUPattern
+    )
+except ImportError:
+    from operator_fusion.fusion_pattrern import (
+        FusionPattern, LinearReLUPattern, LinearBatchNormPattern, BatchNormReLUPattern, LinearBatchNormReLUPattern
+    )
 
 # ============================================================================
 # Operator Fusion Engine
@@ -64,13 +68,13 @@ class OperatorFusion:
     
     def fuse_sequential(self, sequential: Sequential) -> Sequential:
         """
-        对 Sequential 模块执行算子融合
+        fuse operator on Sequential module
         
         Args:
-            sequential: 待融合的 Sequential 模块
+            sequential: Sequential module to be fused
             
         Returns:
-            Sequential: 融合后的 Sequential 模块
+            Sequential: Fused Sequential module
         """
         if not isinstance(sequential, Sequential):
             raise TypeError(f"Expected Sequential module, got {type(sequential)}")
@@ -79,22 +83,24 @@ class OperatorFusion:
         fused_modules = []
         i = 0
         
+        # the basic algorithm is: iterate through the modules, at each position try to match any fusion pattern
         while i < len(modules):
-            # 递归处理嵌套的 Sequential
+            # iterate nested Sequential modules recursively
             if isinstance(modules[i], Sequential):
                 fused_modules.append(self.fuse_sequential(modules[i]))
                 i += 1
                 continue
             
-            # 尝试匹配融合模式
+            # try to match fusion patterns
             matched = False
             for pattern in self.patterns:
+                # iterate our all fusion patterns
                 if pattern.match(modules, i):
-                    # 执行融合
+                    # perform fusion
                     fused_module, consumed = pattern.fuse(modules, i)
                     fused_modules.append(fused_module)
                     
-                    # 记录融合信息
+                    # record fusion information
                     self.fusion_count += 1
                     pattern_name = pattern.__class__.__name__.replace("Pattern", "")
                     original_modules = [type(m).__name__ for m in modules[i:i+consumed]]
@@ -109,7 +115,7 @@ class OperatorFusion:
                     matched = True
                     break
             
-            # 如果没有匹配任何模式，保持原模块
+            # if no pattern matched, keep the original module
             if not matched:
                 fused_modules.append(modules[i])
                 i += 1
@@ -118,59 +124,92 @@ class OperatorFusion:
     
     def fuse_model(self, model: Module) -> Module:
         """
-        对整个模型执行算子融合
+        fuse operators on the entire model
         
         Args:
-            model: 待融合的模型
+            model: Model to be fused
             
         Returns:
-            Module: 融合后的模型
+            Module: Fused model
         """
         self.fusion_count = 0
         self.fusion_log = []
         
-        # 如果模型本身就是 Sequential，直接融合
+        # If the model itself is a Sequential, fuse directly
         if isinstance(model, Sequential):
             return self.fuse_sequential(model)
         
-        # 否则递归处理模型中的所有 Sequential 子模块
+        # Check if it is an FXGraphExecutor (by checking for layer_N attributes)
+        layer_attrs = sorted([name for name in dir(model) if name.startswith('layer_') and name.split('_')[1].isdigit()])
+        if layer_attrs:
+            # FXGraphExecutor case: extract all layer_N, fuse them, and replace back
+            layers = [getattr(model, attr) for attr in layer_attrs]
+            temp_sequential = Sequential(*layers)
+            fused_sequential = self.fuse_sequential(temp_sequential)
+            
+            # Replace back to FXGraphExecutor
+            for i, fused_layer in enumerate(fused_sequential.modules):
+                attr_name = f"layer_{i}"
+                if hasattr(model, attr_name):
+                    delattr(model, attr_name)
+                setattr(model, attr_name, fused_layer)
+                # Update _layer_to_name if it exists
+                if hasattr(model, '_layer_to_name'):
+                    model._layer_to_name[id(fused_layer)] = attr_name
+            
+            # Clean up extra layer attributes
+            for i in range(len(fused_sequential.modules), len(layers)):
+                attr_name = f"layer_{i}"
+                if hasattr(model, attr_name):
+                    delattr(model, attr_name)
+            
+            return model
+        
+        # Otherwise, recursively process all Sequential submodules and complex modules in the model
         for attr_name in dir(model):
             if attr_name.startswith('_'):
                 continue
-            attr = getattr(model, attr_name, None)
+            try:
+                attr = getattr(model, attr_name, None)
+            except:
+                continue
+                
+            if attr is None or not isinstance(attr, Module):
+                continue
+                
             if isinstance(attr, Sequential):
                 fused = self.fuse_sequential(attr)
                 setattr(model, attr_name, fused)
-            elif isinstance(attr, Module) and not isinstance(attr, (Linear, ReLU, BatchNorm1d, LayerNorm1d, Dropout, Identity, Flatten)):
-                # 递归处理复杂子模块
+            elif not isinstance(attr, (Linear, ReLU, BatchNorm1d, LayerNorm1d, Dropout, Identity, Flatten)):
+                # Recursively process complex submodules
                 self.fuse_model(attr)
         
         return model
     
     def print_fusion_report(self):
-        """打印融合报告"""
+        """Print fusion report"""
         print(f"\n{'='*60}")
-        print(f"算子融合报告 (Operator Fusion Report)")
+        print(f"Operator Fusion Report")
         print(f"{'='*60}")
-        print(f"总融合次数: {self.fusion_count}")
+        print(f"Total fusions: {self.fusion_count}")
         print(f"{'-'*60}")
         
         if self.fusion_log:
-            print(f"{'位置':<8} {'融合模式':<25} {'原始算子':<20}")
+            print(f"{'Position':<8} {'Fusion Pattern':<25} {'Original Operators':<20}")
             print(f"{'-'*60}")
             for log in self.fusion_log:
                 print(f"{log['position']:<8} {log['pattern']:<25} {log['original']:<20}")
         else:
-            print("未发现可融合的算子模式")
+            print("No fusion patterns found")
         
         print(f"{'='*60}\n")
     
     def get_fusion_stats(self) -> dict:
         """
-        获取融合统计信息
+        Get fusion statistics
         
         Returns:
-            dict: 包含融合统计信息的字典
+            dict: Dictionary containing fusion statistics
         """
         pattern_counts = {}
         for log in self.fusion_log:
@@ -190,24 +229,14 @@ class OperatorFusion:
 
 def fuse_operators(model: Module, verbose: bool = True) -> Module:
     """
-    对模型执行算子融合的便捷函数
+    Convenient function to perform operator fusion on a model
     
     Args:
-        model: 待融合的 Needle 模型
-        verbose: 是否打印融合报告
+        model: Needle model to be fused
+        verbose: Whether to print the fusion report
         
     Returns:
-        Module: 融合后的模型
-    
-    Example:
-        >>> from torch2needle_converter import torch2needle_fx
-        >>> from operator_fusion import fuse_operators
-        >>> 
-        >>> # 转换 PyTorch 模型为 Needle 模型
-        >>> needle_model, _, _ = torch2needle_fx(torch_model)
-        >>> 
-        >>> # 执行算子融合
-        >>> fused_model = fuse_operators(needle_model, verbose=True)
+        Module: Fused model
     """
     # Pattern can be increamental added
     patterns = [
@@ -227,16 +256,16 @@ def fuse_operators(model: Module, verbose: bool = True) -> Module:
 
 def get_fusion_stats(model: Module) -> dict:
     """
-    获取模型融合统计信息（不修改模型）
+    Get fusion statistics of the model (without modifying the model)
     
     Args:
-        model: Needle 模型
+        model: Needle model
         
     Returns:
-        dict: 融合统计信息
+        dict: Dictionary containing fusion statistics
     """
     fusion_engine = OperatorFusion()
-    # 在临时副本上执行融合以获取统计信息
+    # Perform fusion on a temporary copy to get statistics
     import copy
     temp_model = copy.deepcopy(model)
     fusion_engine.fuse_model(temp_model)
@@ -248,7 +277,7 @@ if __name__ == "__main__":
     print("算子融合模块测试")
     print("="*60)
     
-    # 创建一个简单的测试模型
+    # Create a simple test model
     test_model = Sequential(
         Linear(10, 20),
         ReLU(),
@@ -262,7 +291,7 @@ if __name__ == "__main__":
     print(test_model)
     print()
     
-    # 执行融合
+    # Perform fusion
     fused_model = fuse_operators(test_model, verbose=True)
     
     print("融合后模型:")

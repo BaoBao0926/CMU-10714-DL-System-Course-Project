@@ -17,10 +17,18 @@ from needle.nn.nn_basic import (
 )
 from typing import Any, List, Tuple, Optional
 
+try:
+    from fused_layer import (
+        LinearReLU, LinearBatchNorm, BatchNormReLU, LinearBatchNormReLU,
+    )
+except ImportError:
+    from operator_fusion.fused_layer import (
+        LinearReLU, LinearBatchNorm, BatchNormReLU, LinearBatchNormReLU,
+    )
 
 
 # ============================================================================
-# 融合模式识别和应用 (Fusion Pattern Recognition and Application)
+# Fusion Pattern Recognition and Application
 # ============================================================================
 
 
@@ -57,7 +65,7 @@ class FusionPattern:
 
 
 class LinearReLUPattern(FusionPattern):
-    """Linear + ReLU 融合模式"""
+    """Linear + ReLU fusion pattern"""
     
     def match(self, modules: List[Module], start_idx: int) -> bool:
         if start_idx + 1 >= len(modules):
@@ -75,7 +83,7 @@ class LinearReLUPattern(FusionPattern):
 
 
 class LinearBatchNormPattern(FusionPattern):
-    """Linear + BatchNorm1d 融合模式"""
+    """Linear + BatchNorm1d fusion pattern"""
     
     def match(self, modules: List[Module], start_idx: int) -> bool:
         if start_idx + 1 >= len(modules):

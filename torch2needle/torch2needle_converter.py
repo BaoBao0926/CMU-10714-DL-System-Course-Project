@@ -5,8 +5,18 @@ from needle.nn.nn_basic import Module, Identity, Linear, Flatten, ReLU, Sequenti
 from needle.nn.nn_basic import ADD, SUB
 from needle import Tensor
 import needle
-from utils import print_trace_grouped
-from torch_models import *
+
+# 尝试导入 utils，如果失败则跳过（用于独立导入时）
+try:
+    from utils import print_trace_grouped
+except ImportError:
+    from torch2needle.utils import print_trace_grouped
+
+# 尝试导入 torch_models，如果失败则跳过（用于独立导入时）
+try:
+    from torch_models import *
+except ImportError:
+    pass
 
 import torch
 import torch.nn as nn

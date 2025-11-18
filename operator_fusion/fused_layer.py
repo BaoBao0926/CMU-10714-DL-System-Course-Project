@@ -19,15 +19,15 @@ from typing import Any, List, Tuple, Optional
 
 
 # ============================================================================
-# 融合算子定义 (Fused Operator Definitions)
+# Fused Operator Definitions
 # ============================================================================
 
 
 
 class LinearReLU(Module):
     """
-    融合 Linear + ReLU 层
-    将线性变换和 ReLU 激活函数融合为一个算子，减少中间变量存储和计算开销
+    fuse Linear + ReLU layer
+    combine linear layer and Relu into a single layer
     
     Uses the fused_linear_relu operation which combines matmul + bias + relu
     into a single operation for better memory efficiency.
@@ -38,7 +38,7 @@ class LinearReLU(Module):
         self.in_features = in_features
         self.out_features = out_features
         
-        # 初始化权重和偏置
+        # Initialize weights and bias
         W = init.kaiming_uniform(in_features, out_features, device=device, dtype=dtype)
         self.weight = Parameter(W)
         if bias:
@@ -48,14 +48,14 @@ class LinearReLU(Module):
             self.bias = None
 
     def forward(self, X: Tensor) -> Tensor:
-        """执行融合的 Linear + ReLU 操作 using fused op"""
+        """Perform fused Linear + ReLU operation using fused op"""
         return fused_linear_relu(X, self.weight, self.bias)
 
 
 class LinearBatchNorm(Module):
     """
-    融合 Linear + BatchNorm1d 层
-    在训练时可以减少内存访问次数，提高缓存利用率
+    Fuse Linear + BatchNorm1d layer
+    Can reduce memory access and improve cache utilization during training
     
     Uses the fused_linear_batchnorm operation for better performance.
     """
@@ -68,7 +68,7 @@ class LinearBatchNorm(Module):
         self.eps = eps
         self.momentum = momentum
         
-        # Linear 层参数
+        # Linear layer parameters
         W = init.kaiming_uniform(in_features, out_features, device=device, dtype=dtype)
         self.weight = Parameter(W)
         if bias:
@@ -77,18 +77,18 @@ class LinearBatchNorm(Module):
         else:
             self.linear_bias = None
         
-        # BatchNorm 层参数
+        # BatchNorm layer parameters
         self.bn_weight = Parameter(init.ones(out_features, device=device, dtype=dtype))
         self.bn_bias = Parameter(init.zeros(out_features, device=device, dtype=dtype))
         
-        # 运行时统计量（不参与梯度计算）
+        # Running statistics (not trainable)
         self.running_mean = Tensor(init.zeros(out_features, device=device, dtype=dtype), 
                                    device=device, dtype=dtype, requires_grad=False)
         self.running_var = Tensor(init.ones(out_features, device=device, dtype=dtype), 
                                   device=device, dtype=dtype, requires_grad=False)
 
     def forward(self, X: Tensor) -> Tensor:
-        """执行融合的 Linear + BatchNorm 操作 using fused op"""
+        """Perform fused Linear + BatchNorm operation using fused op"""
         # Use fused operation for forward pass
         out = fused_linear_batchnorm(
             X, self.weight, self.linear_bias,
@@ -122,8 +122,8 @@ class LinearBatchNorm(Module):
 
 class BatchNormReLU(Module):
     """
-    融合 BatchNorm1d + ReLU 层
-    常用于 ResNet 等架构中
+    Fuse BatchNorm1d + ReLU layer
+    Commonly used in architectures like ResNet
     
     Uses the fused_batchnorm_relu operation for better performance.
     """
@@ -134,18 +134,18 @@ class BatchNormReLU(Module):
         self.eps = eps
         self.momentum = momentum
         
-        # BatchNorm 参数
+        # BatchNorm parameters
         self.weight = Parameter(init.ones(dim, device=device, dtype=dtype))
         self.bias = Parameter(init.zeros(dim, device=device, dtype=dtype))
         
-        # 运行时统计量
+        # Running statistics
         self.running_mean = Tensor(init.zeros(dim, device=device, dtype=dtype), 
                                    device=device, dtype=dtype, requires_grad=False)
         self.running_var = Tensor(init.ones(dim, device=device, dtype=dtype), 
                                   device=device, dtype=dtype, requires_grad=False)
 
     def forward(self, x: Tensor) -> Tensor:
-        """执行融合的 BatchNorm + ReLU 操作 using fused op"""
+        """Perform fused BatchNorm + ReLU operation using fused op"""
         # Use fused operation
         out = fused_batchnorm_relu(
             x, self.weight, self.bias,
@@ -171,8 +171,8 @@ class BatchNormReLU(Module):
 
 class LinearBatchNormReLU(Module):
     """
-    融合 Linear + BatchNorm1d + ReLU 层
-    三层融合，进一步减少中间变量和内存访问
+    Fuse Linear + BatchNorm1d + ReLU layer
+    Three-layer fusion to further reduce intermediate variables and memory access
     
     Uses the fused_linear_batchnorm_relu operation for maximum performance.
     """
@@ -185,7 +185,7 @@ class LinearBatchNormReLU(Module):
         self.eps = eps
         self.momentum = momentum
         
-        # Linear 层参数
+        # Linear layer parameters
         W = init.kaiming_uniform(in_features, out_features, device=device, dtype=dtype)
         self.weight = Parameter(W)
         if bias:
@@ -194,18 +194,18 @@ class LinearBatchNormReLU(Module):
         else:
             self.linear_bias = None
         
-        # BatchNorm 层参数
+        # BatchNorm layer parameters
         self.bn_weight = Parameter(init.ones(out_features, device=device, dtype=dtype))
         self.bn_bias = Parameter(init.zeros(out_features, device=device, dtype=dtype))
         
-        # 运行时统计量
+        # Running statistics
         self.running_mean = Tensor(init.zeros(out_features, device=device, dtype=dtype), 
                                    device=device, dtype=dtype, requires_grad=False)
         self.running_var = Tensor(init.ones(out_features, device=device, dtype=dtype), 
                                   device=device, dtype=dtype, requires_grad=False)
 
     def forward(self, X: Tensor) -> Tensor:
-        """执行融合的 Linear + BatchNorm + ReLU 操作 using fused op"""
+        """Perform fused Linear + BatchNorm + ReLU operation using fused op"""
         # Use fused operation for forward pass
         out = fused_linear_batchnorm_relu(
             X, self.weight, self.linear_bias,
