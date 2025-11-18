@@ -67,7 +67,7 @@ If you want to add one more fused operator, you should add:
   - in starter function fuse_operator(), add new fused operator into `patterns = []`
 
 **TODO**:
-  - @shuaiwei, write C++ code for each fusd operator
+  - @shuaiwei, write C++ code for each fusd operator in needle/ops/ops_fused.py
  
 ## Optimization on AMD GPU
 

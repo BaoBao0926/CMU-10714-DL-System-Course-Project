@@ -1,5 +1,3 @@
-# TODO： 在抄了github的底层之后，需要把这里的写法在检查一遍
-
 """
 Fused operator implementations for Needle deep learning framework.
 
