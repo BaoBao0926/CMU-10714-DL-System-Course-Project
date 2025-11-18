@@ -74,12 +74,22 @@ def build_executable_model(torch_model, fx_graph, node_to_layer, torch_mapping_n
             # 使用 _ 前缀使其在打印时被忽略
             self._layer_to_name = {}
             
-            # 将所有层作为属性存储，以便 parameters() 可以找到它们
-            for i, (node_name, layer) in enumerate(node_to_layer.items()):
-                if not isinstance(layer, Identity):
-                    layer_name = f"layer_{i}"
+            # 去重：只为每个唯一的 layer 对象创建一个属性
+            seen_layers = {}  # id(layer) -> layer_name
+            layer_counter = 0
+            
+            for node_name, layer in node_to_layer.items():
+                if isinstance(layer, Identity):
+                    continue
+                    
+                layer_id = id(layer)
+                if layer_id not in seen_layers:
+                    # 首次遇到这个 layer，创建属性
+                    layer_name = f"layer_{layer_counter}"
                     setattr(self, layer_name, layer)
-                    self._layer_to_name[id(layer)] = layer_name
+                    seen_layers[layer_id] = layer_name
+                    self._layer_to_name[layer_id] = layer_name
+                    layer_counter += 1
         
         def __repr__(self):
             """自定义打印格式，显示 ADD/SUB 的 left/right 引用"""
