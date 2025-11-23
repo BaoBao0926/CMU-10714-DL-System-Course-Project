@@ -3,8 +3,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from needle.nn.nn_basic import Module, Identity, Linear, Flatten, ReLU, Sequential, BatchNorm1d, LayerNorm1d, Dropout, Residual, SoftmaxLoss
 from needle.nn.nn_basic import ADD, SUB
-from needle import Tensor
-import needle
+import needle as nd
 
 # 尝试导入 utils，如果失败则跳过（用于独立导入时）
 try:
@@ -20,16 +19,12 @@ except ImportError:
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import numpy as np
-import needle.init as init
-import random
 from torch.fx import symbolic_trace
 import operator
 
 
 # Torch2Needle, starter function
-def torch2needle_fx(torch_model):
+def torch2needle_fx(torch_model,device,dtype):
     traced = symbolic_trace(torch_model)
     print(traced)
     named_modules = dict(traced.named_modules())
@@ -39,9 +34,9 @@ def torch2needle_fx(torch_model):
     torch_mapping_needle = {}
 
     output_node = list(traced.graph.nodes)[-1]
-    _, trace_log = convert_node(output_node, named_modules, node_to_layer, torch_mapping_needle)
+    _, trace_log = convert_node(output_node, named_modules, node_to_layer, torch_mapping_needle,device=device,dtype=dtype)
 
-    # supplement Sequential modules to mapping (for weight loading integrity)
+    # add sequential modules to current torch-mapping-needle mapping relation
     populate_sequential_mapping(torch_model, named_modules, torch_mapping_needle)
 
     # construct executable Needle model
@@ -83,7 +78,7 @@ def build_executable_model(torch_model, fx_graph, node_to_layer, torch_mapping_n
                     continue
                     
                 layer_id = id(layer)
-                if layer_id not in seen_layers:
+                if layer_id not in seen_layers: # 如果这里只创建一个seen_layers会有问题吗？
                     # 首次遇到这个 layer，创建属性
                     layer_name = f"layer_{layer_counter}"
                     setattr(self, layer_name, layer)
@@ -275,11 +270,16 @@ def build_model_structure(torch_model, named_modules, torch_mapping_needle):
     
     return NeedleModelWrapper(None)
 
-# convert Linear Layers/CNN layers and so on
-def convert_layer(layer):
+#### here is the complete mapping logic ####
+#### just map each torch layer to needle one and initialize in needle ####
+
+def convert_layer(layer,device,dtype):
     """transform a single PyTorch layer into Needle layer"""
     if isinstance(layer, nn.Linear):
-        return Linear(layer.in_features, layer.out_features)
+        bias = False
+        if layer.bias is not None:
+            bias = True
+        return Linear(layer.in_features, layer.out_features,bias=bias,device=device,dtype=dtype)
     elif isinstance(layer, nn.ReLU):
         return ReLU()
     elif isinstance(layer, nn.Flatten):
@@ -287,9 +287,9 @@ def convert_layer(layer):
     elif isinstance(layer, nn.Dropout):
         return Dropout(layer.p)
     elif isinstance(layer, nn.BatchNorm1d):
-        return BatchNorm1d(layer.num_features)
+        return BatchNorm1d(layer.num_features,eps=layer.eps,momentum=layer.momentum,device=device,dtype=dtype)
     elif isinstance(layer, nn.LayerNorm):
-        return LayerNorm1d(layer.normalized_shape[0])
+        return LayerNorm1d(layer.normalized_shape[0],device=device,dtype=dtype)
     elif isinstance(layer, nn.Identity):
         return Identity()
     elif isinstance(layer, nn.Sequential):
@@ -299,7 +299,7 @@ def convert_layer(layer):
         raise NotImplementedError
 
 # convert ADD/SUB and so on
-def convert_function_node(node, named_modules, node_to_layer, torch_mapping_needle, depth, trace_log):
+def convert_function_node(node, named_modules, node_to_layer, torch_mapping_needle, depth, trace_log,device,dtype):
     """
     deal with call_function nodes:
       - operator.add
@@ -315,16 +315,16 @@ def convert_function_node(node, named_modules, node_to_layer, torch_mapping_need
 
     if op == operator.add:
         left, trace_log = convert_node(node.args[0], named_modules, node_to_layer, torch_mapping_needle,
-                                       depth + 1, parent=node.name, trace_log=trace_log)
+                                       depth + 1, parent=node.name, trace_log=trace_log,device=device,dtype=dtype)
         right, trace_log = convert_node(node.args[1], named_modules, node_to_layer, torch_mapping_needle,
-                                        depth + 1, parent=node.name, trace_log=trace_log)
+                                        depth + 1, parent=node.name, trace_log=trace_log,device=device,dtype=dtype)
         module = ADD(left, right)
         note = "operator.add"
     elif op == operator.sub:
         left, trace_log = convert_node(node.args[0], named_modules, node_to_layer, torch_mapping_needle,
-                                       depth + 1, parent=node.name, trace_log=trace_log)
+                                       depth + 1, parent=node.name, trace_log=trace_log,device=device,dtype=dtype)
         right, trace_log = convert_node(node.args[1], named_modules, node_to_layer, torch_mapping_needle,
-                                        depth + 1, parent=node.name, trace_log=trace_log)
+                                        depth + 1, parent=node.name, trace_log=trace_log,device=device,dtype=dtype)
         module = SUB(left, right)
         note = "operator.sub"
     # elif op == operator.mul:
@@ -354,7 +354,7 @@ def convert_function_node(node, named_modules, node_to_layer, torch_mapping_need
     return module, note, trace_log
 
 # main Torch2Needle converter
-def convert_node(node, named_modules, node_to_layer, torch_mapping_needle, depth=0, parent=None, trace_log=None):
+def convert_node(node, named_modules, node_to_layer, torch_mapping_needle, depth=0, parent=None, trace_log=None,device=nd.cpu(),dtype="float32"):
     if trace_log is None:
         trace_log = []
 
@@ -394,7 +394,7 @@ def convert_node(node, named_modules, node_to_layer, torch_mapping_needle, depth
         for arg in node.all_input_nodes:
             if arg.name not in node_to_layer and arg.op != "placeholder":
                 _, trace_log = convert_node(arg, named_modules, node_to_layer, torch_mapping_needle,
-                                           depth + 1, parent=node.name, trace_log=trace_log)
+                                           depth + 1, parent=node.name, trace_log=trace_log,device=device,dtype=dtype)
 
         # check if this PyTorch layer has been converted before (reuse the same Needle module)
         if torch_layer in torch_mapping_needle:
@@ -402,8 +402,8 @@ def convert_node(node, named_modules, node_to_layer, torch_mapping_needle, depth
             entry["note"] = "reusing existing needle module"
         else:
             # transform current layer
-            module = convert_layer(torch_layer)
-            torch_mapping_needle[torch_layer] = module
+            module = convert_layer(torch_layer,device,dtype)
+            torch_mapping_needle[torch_layer] = module # record mapping relation from torch model to needle model
         
         entry["needle_type"] = type(module).__name__
 
@@ -411,7 +411,7 @@ def convert_node(node, named_modules, node_to_layer, torch_mapping_needle, depth
     elif node.op == "call_function":
         entry["module_type"] = "function"
         module, note, trace_log = convert_function_node(
-            node, named_modules, node_to_layer, torch_mapping_needle, depth, trace_log
+            node, named_modules, node_to_layer, torch_mapping_needle, depth, trace_log,device,dtype
         )
         entry["needle_type"] = type(module).__name__
         entry["note"] = note
@@ -424,14 +424,14 @@ def convert_node(node, named_modules, node_to_layer, torch_mapping_needle, depth
             real_output = real_output[0]
         if isinstance(real_output, torch.fx.Node):
             module, trace_log = convert_node(real_output, named_modules, node_to_layer, torch_mapping_needle,
-                                             depth + 1, parent=node.name, trace_log=trace_log)
+                                             depth + 1, parent=node.name, trace_log=trace_log,device=device,dtype=dtype)
             entry["needle_type"] = type(module).__name__
         elif isinstance(real_output, (tuple, list)) and all(isinstance(n, torch.fx.Node) for n in real_output):
             # 多输出情况：只转换节点，不创建 Sequential
             # 返回最后一个节点的模块（通常是主输出）
             for n in real_output:
                 module, trace_log = convert_node(n, named_modules, node_to_layer, torch_mapping_needle,
-                                                depth + 1, parent=node.name, trace_log=trace_log)
+                                                depth + 1, parent=node.name, trace_log=trace_log,device=device,dtype=dtype)
             # module 已经是最后一个节点的模块
             entry["needle_type"] = type(module).__name__
         else:
