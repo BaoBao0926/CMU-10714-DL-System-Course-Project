@@ -8,6 +8,7 @@ sys.path.append(os.path.dirname(__file__))
 import torch
 import torch.nn as nn
 import numpy as np
+import needle as ndl
 from needle import Tensor
 from needle.nn import Sequential, Linear, ReLU, BatchNorm1d
 
@@ -104,7 +105,7 @@ class ResNetModel(nn.Module):
         return x
 
 
-def _run_pipeline_test(torch_model, input_shape):
+def _run_pipeline_test(torch_model, input_shape,device=ndl.cpu(),dtype="fl"):
     """运行完整的 PyTorch → Needle → 权重加载 → 算子融合 流程测试"""
     
     # Step 1: 创建 PyTorch 模型
@@ -123,7 +124,7 @@ def _run_pipeline_test(torch_model, input_shape):
     
     # Step 2: 转换为 Needle 模型
     print("\n【Step 2】转换为 Needle 模型")
-    needle_model, trace_log, torch_mapping_needle = torch2needle_fx(torch_model)
+    needle_model, trace_log, torch_mapping_needle = torch2needle_fx(torch_model,device,dtype)
     
     print(f"Needle 模型类型: {type(needle_model).__name__}")
     print(f"Needle 模型结构:")
@@ -131,14 +132,14 @@ def _run_pipeline_test(torch_model, input_shape):
     
     # Step 3: 加载权重
     print("\n【Step 3】加载权重")
-    load_torch_weights_by_mapping(torch_mapping_needle, verbose=True)
+    load_torch_weights_by_mapping(torch_mapping_needle, verbose=True,device=device,dtype=dtype)
     
     # 设置为 eval 模式
     needle_model.eval()
     
     # Step 4: 验证转换后的模型输出
     print("\n【Step 4】验证转换后模型")
-    needle_input = Tensor(test_input.detach().numpy())
+    needle_input = Tensor(test_input.detach().numpy(),device=device,dtype=dtype)
     needle_output_before = needle_model(needle_input)
     
     diff_before = np.abs(torch_output.detach().numpy() - needle_output_before.numpy())
@@ -207,24 +208,26 @@ def _run_pipeline_test(torch_model, input_shape):
 
 
 
-def test_simple_model():
+def test_simple_model(device=ndl.cpu(),dtype="float32"):
     """测试简单的双分支模型"""
     print("=" * 80)
     print("测试 1: 简单双分支模型")
     print("=" * 80)
-    return _run_pipeline_test(SimpleTorchModel(), (5, 10))
+    return _run_pipeline_test(SimpleTorchModel(), (5, 10),device,dtype)
 
 
-def test_resnet_model():
+def test_resnet_model(device=ndl.cpu(),dtype="float32"):
     """测试 ResNet 模型"""
     print("\n" + "=" * 80)
     print("测试 2: ResNet 模型")
     print("=" * 80)
-    return _run_pipeline_test(ResNetModel(input_dim=32, num_classes=10), (5, 32))
+    return _run_pipeline_test(ResNetModel(input_dim=32, num_classes=10), (5, 32),device,dtype)
 
 
 if __name__ == "__main__":
     all_passed = True
+    device = ndl.cpu()
+    dtype = "float32"
     
     # 测试 1: 简单双分支模型
     print("\n" + "=" * 80)
