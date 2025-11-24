@@ -1,2 +1,5 @@
 build/
 data/
+draft.py
+__pycache__
+!needle/data
