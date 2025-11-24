@@ -658,7 +658,7 @@ class NDArray:
 
         ### END YOUR SOLUTION
 
-    def pad(self, axes: tuple[tuple[int, int], ...]) -> "NDArray":
+    def pad(self, axes: tuple[tuple[int, int], ...],constant_value=0) -> "NDArray":
         """
         Pad this ndarray by zeros by the specified amount in `axes`,
         which lists for _all_ axes the left and right padding amount, e.g.,
@@ -672,7 +672,7 @@ class NDArray:
             new_shape.append(new_dim)
         new_shape = tuple(new_shape)
         # create a new pad array
-        pad_array = full(new_shape,0,device=self.device)
+        pad_array = full(new_shape,constant_value,device=self.device)
         # insert previous array to new array
         slices = []
         for i,(before,_) in enumerate(axes):
@@ -728,6 +728,9 @@ def tanh(a: NDArray) -> NDArray:
 def sum(a: NDArray, axis: int | tuple[int] | list[int] | None = None, keepdims: bool = False) -> NDArray:
     return a.sum(axis=axis, keepdims=keepdims)
 
+def mean(a:NDArray,axis:int | tuple[int] | list[int] | None = None, keepdims: bool = False) -> NDArray:
+    ## support one axis mean only ##
+    return a.sum(axis=axis,keepdims=keepdims) / a.shape[axis]
 
 def flip(a: NDArray, axes: tuple[int, ...]) -> NDArray:
     return a.flip(axes)

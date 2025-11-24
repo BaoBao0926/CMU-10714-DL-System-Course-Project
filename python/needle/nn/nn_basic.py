@@ -252,7 +252,6 @@ class Residual(Module):
     def __init__(self, fn: Module) -> None:
         super().__init__()
         self.fn = fn
-
     def forward(self, x: Tensor) -> Tensor:
         ### BEGIN YOUR SOLUTION
         return self.fn(x) + x
