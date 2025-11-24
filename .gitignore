@@ -1,5 +1,5 @@
 build/
 data/
 draft.py
-__pycache__
+__pycache__/
 !needle/data
