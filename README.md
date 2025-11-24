@@ -32,10 +32,29 @@ uv sync
 
 # activate the environment
 source /your-path-to-project/.venv/bin/activate
+
+# you will see the environment in command line in:
+(10714-hw4) Username@Host:your-path-to-project/
 ```
 
+After you build the environment, please set global variable to:
+```bash
+%set_env PYTHONPATH ./needle
+%set_env NEEDLE_BACKEND nd
+```
 
-
+To test if your environment is run correctly, you can run pytest command in hw4.ipynb for verification, for example:
+```bash
+!python3 -m pytest -l -v -k "language_model_implementation"
+```
+You will see all tests are passed just like this:
+```bash
+tests/hw4/test_sequence_models.py::test_language_model_implementation[cpu-rnn-1-True-1-1-1-1-1] ]9;4;1;0\PASSED
+tests/hw4/test_sequence_models.py::test_language_model_implementation[cpu-rnn-1-True-1-1-1-1-13] ]9;4;1;0\PASSED
+tests/hw4/test_sequence_models.py::test_language_model_implementation[cpu-rnn-1-True-1-1-1-2-1] ]9;4;1;0\PASSED
+tests/hw4/test_sequence_models.py::test_language_model_implementation[cpu-rnn-1-True-1-1-1-2-13] ]9;4;1;0\PASSED
+...
+```
 
 
 ## Torch2Needle
