@@ -1,11 +1,19 @@
 # CMU-10714-DL-System-Course-Project
-This is the repository of course prohect of CMU course: 10714 Deep Learning System: Algotirhm and Implementation
+This is the repository of course project of CMU course: 10714 Deep Learning System: Algotirhm and Implementation
 
 
 ```bash
 # clone the repo
 git clone https://github.com/BaoBao0926/CMU-10714-DL-System-Course-Project.git
 ```
+
+You are free to build developer environment by both conda or uv, but you should make sure the environment is running on linux (either x86 Ubuntu systems or Windows WSL). 
+
+If you are a window system user, please make sure your computer has WSL. You can refer to the guideline at here: https://www.bilibili.com/video/BV1tW42197za/?spm_id_from=333.1007.top_right_bar_window_default_collection.content.click
+
+You are free to build the environment by conda or uv
+
+conda:
 
 ```bash
 # config the environment
@@ -17,6 +25,18 @@ conda activate torch2needle
 # install requirement
 pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu126
 ```
+uv: 
+```bash
+# config the environment
+uv sync
+
+# activate the environment
+source /your-path-to-project/.venv/bin/activate
+```
+
+
+
+
 
 ## Torch2Needle
 
@@ -68,10 +88,9 @@ If you want to add one more fused operator, you should add:
 
 **TODO**:
   - @shuaiwei, write C++ code for each fusd operator in needle/ops/ops_fused.py
- 
+
 ## Optimization on AMD GPU
 
 **TODO**:
   - @shuaiwei, good luck to you
-
 
