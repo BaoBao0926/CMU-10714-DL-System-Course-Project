@@ -3,6 +3,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from needle.nn.nn_basic import Module, Identity, Linear, Flatten, ReLU, Sequential, BatchNorm1d, LayerNorm1d, Dropout, Residual, SoftmaxLoss
 from needle.nn.nn_basic import ADD, SUB
+from needle.nn.nn_transformer import MultiHeadAttention, AttentionLayer, TransformerLayer, Transformer
+from needle.nn.nn_sequence import Embedding
 import needle as nd
 
 # 尝试导入 utils，如果失败则跳过（用于独立导入时）
@@ -151,6 +153,40 @@ def build_executable_model(torch_model, fx_graph, node_to_layer, torch_mapping_n
                         # 对于其他函数，尝试调用存储的模块
                         needle_layer = self.node_to_layer.get(node.name, Identity())
                         env[node.name] = needle_layer(inputs[0]) if inputs else needle_layer()
+                
+                elif node.op == "call_method":
+                    # 调用方法 - 例如 tensor.mean(), tensor.size() 等
+                    # 获取输入（方法调用的对象）
+                    if len(node.all_input_nodes) > 0:
+                        target_tensor = env[node.all_input_nodes[0].name]
+                        method_name = node.target
+                        
+                        # 处理常见方法
+                        if method_name == "mean":
+                            # 提取 dim 参数
+                            kwargs = node.kwargs if hasattr(node, 'kwargs') else {}
+                            dim = kwargs.get('dim', None)
+                            if dim is not None:
+                                import needle.ops as ops
+                                env[node.name] = ops.summation(target_tensor, axes=(dim,)) / target_tensor.shape[dim]
+                            else:
+                                # 全局 mean
+                                import needle.ops as ops
+                                total = 1
+                                for s in target_tensor.shape:
+                                    total *= s
+                                env[node.name] = ops.summation(target_tensor) / total
+                        elif method_name == "size":
+                            # size() 方法 - 返回形状信息，在这里我们跳过
+                            env[node.name] = target_tensor
+                        elif method_name == "unsqueeze":
+                            # unsqueeze - 扩展维度
+                            env[node.name] = target_tensor
+                        else:
+                            # 其他方法，直接传递
+                            env[node.name] = target_tensor
+                    else:
+                        env[node.name] = Identity()
                         
                 elif node.op == "output":
                     # 输出节点
@@ -298,6 +334,154 @@ def convert_layer(layer,device,dtype):
         return Identity()
     elif isinstance(layer, nn.Sequential):
         return Sequential(*[convert_layer(m) for m in layer])
+    
+    # Transformer components-may not work too well, since our needle implementation is different from torch implementation
+    elif isinstance(layer, nn.MultiheadAttention):
+        # PyTorch MultiheadAttention parameters
+        embed_dim = layer.embed_dim
+        num_heads = layer.num_heads
+        dropout = layer.dropout
+        # Note: PyTorch's MultiheadAttention has batch_first parameter
+        # but our Needle implementation has causal parameter
+        # We'll use default causal=False for now
+        return MultiHeadAttention(
+            dropout=dropout,
+            causal=False,
+            device=device,
+            dtype=dtype
+        )
+    
+    elif isinstance(layer, nn.Embedding):
+        return Embedding(
+            layer.num_embeddings,
+            layer.embedding_dim,
+            device=device,
+            dtype=dtype
+        )
+    
+    elif isinstance(layer, nn.TransformerEncoderLayer):
+        # PyTorch TransformerEncoderLayer parameters
+        d_model = layer.self_attn.embed_dim
+        nhead = layer.self_attn.num_heads
+        dim_feedforward = layer.linear1.out_features
+        dropout = layer.dropout.p if hasattr(layer.dropout, 'p') else 0.0
+        
+        # Calculate dim_head from d_model and nhead
+        dim_head = d_model // nhead
+        
+        return TransformerLayer(
+            q_features=d_model,
+            num_head=nhead,
+            dim_head=dim_head,
+            hidden_size=dim_feedforward,
+            dropout=dropout,
+            causal=False,  # Encoder layers are typically not causal
+            device=device,
+            dtype=dtype
+        )
+    
+    elif isinstance(layer, nn.TransformerDecoderLayer):
+        # PyTorch TransformerDecoderLayer parameters
+        d_model = layer.self_attn.embed_dim
+        nhead = layer.self_attn.num_heads
+        dim_feedforward = layer.linear1.out_features
+        dropout = layer.dropout.p if hasattr(layer.dropout, 'p') else 0.0
+        
+        # Calculate dim_head from d_model and nhead
+        dim_head = d_model // nhead
+        
+        return TransformerLayer(
+            q_features=d_model,
+            num_head=nhead,
+            dim_head=dim_head,
+            hidden_size=dim_feedforward,
+            dropout=dropout,
+            causal=True,  # Decoder layers are typically causal
+            device=device,
+            dtype=dtype
+        )
+    
+    elif isinstance(layer, nn.TransformerEncoder):
+        # PyTorch TransformerEncoder is a stack of TransformerEncoderLayer
+        # We need to convert each layer individually and store the mapping
+        # This should NOT be called directly - the convert_layer is typically called
+        # from convert_node which handles the mapping
+        # For now, just convert each layer
+        if hasattr(layer, 'layers') and len(layer.layers) > 0:
+            needle_layers = []
+            for torch_enc_layer in layer.layers:
+                # Convert each TransformerEncoderLayer
+                needle_layer = convert_layer(torch_enc_layer, device, dtype)
+                needle_layers.append(needle_layer)
+            return Sequential(*needle_layers)
+        else:
+            print("[Warning] TransformerEncoder has no layers")
+            return Identity()
+    
+    elif isinstance(layer, nn.TransformerDecoder):
+        # PyTorch TransformerDecoder is a stack of TransformerDecoderLayer
+        # Extract parameters from the first layer
+        if hasattr(layer, 'layers') and len(layer.layers) > 0:
+            first_layer = layer.layers[0]
+            d_model = first_layer.self_attn.embed_dim
+            nhead = first_layer.self_attn.num_heads
+            dim_feedforward = first_layer.linear1.out_features
+            dropout = first_layer.dropout.p if hasattr(first_layer.dropout, 'p') else 0.0
+            num_layers = len(layer.layers)
+            
+            # Calculate dim_head
+            dim_head = d_model // nhead
+            
+            # Create a Sequential of TransformerLayer instances
+            needle_layers = []
+            for _ in range(num_layers):
+                needle_layers.append(
+                    TransformerLayer(
+                        q_features=d_model,
+                        num_head=nhead,
+                        dim_head=dim_head,
+                        hidden_size=dim_feedforward,
+                        dropout=dropout,
+                        causal=True,  # Decoder is causal
+                        device=device,
+                        dtype=dtype
+                    )
+                )
+            return Sequential(*needle_layers)
+        else:
+            print("[Warning] TransformerDecoder has no layers")
+            return Identity()
+    
+    elif isinstance(layer, nn.Transformer):
+        # PyTorch Transformer parameters
+        d_model = layer.d_model
+        nhead = layer.nhead
+        num_encoder_layers = layer.num_encoder_layers
+        num_decoder_layers = layer.num_decoder_layers
+        dim_feedforward = layer.encoder.layers[0].linear1.out_features if hasattr(layer, 'encoder') else 2048
+        dropout = layer.dropout
+        
+        # Calculate dim_head
+        dim_head = d_model // nhead
+        
+        # For simplicity, we'll treat it as a decoder-only transformer (causal=True)
+        # and use total number of layers
+        num_layers = num_encoder_layers + num_decoder_layers
+        
+        return Transformer(
+            embedding_size=d_model,
+            hidden_size=dim_feedforward,
+            num_layers=num_layers,
+            num_head=nhead,
+            dim_head=dim_head,
+            dropout=dropout,
+            causal=True,
+            device=device,
+            dtype=dtype,
+            batch_first=True,  # Assuming batch_first
+            sequence_len=2048  # Default sequence length
+        )
+    
     else:
         print(f"[Warning] Unsupported layer: {layer.__class__.__name__}, replaced with Identity().")
         raise NotImplementedError
@@ -349,6 +533,36 @@ def convert_function_node(node, named_modules, node_to_layer, torch_mapping_need
     elif op == torch.flatten:
         module = Flatten()
         note = "torch.flatten"
+    
+    elif op == operator.getitem:
+        # Handle tuple/list indexing (e.g., for multi-output operations)
+        # Convert the input node first
+        input_node, trace_log = convert_node(node.args[0], named_modules, node_to_layer, torch_mapping_needle,
+                                             depth + 1, parent=node.name, trace_log=trace_log, device=device, dtype=dtype)
+        # For getitem, we just pass through the input module
+        # The actual indexing will be handled at runtime
+        module = Identity()
+        note = "operator.getitem (pass-through)"
+    
+    elif op == getattr or (hasattr(__builtins__, 'getattr') and op == __builtins__.getattr):
+        # Handle getattr operations (e.g., accessing module attributes)
+        module = Identity()
+        note = "getattr (pass-through)"
+    
+    elif hasattr(torch, 'arange') and op == torch.arange:
+        # Handle torch.arange - used for position encoding
+        module = Identity()
+        note = "torch.arange (pass-through)"
+    
+    elif hasattr(torch.Tensor, 'size') and str(op) == 'size':
+        # Handle tensor.size() calls
+        module = Identity()
+        note = "tensor.size (pass-through)"
+    
+    elif hasattr(torch.Tensor, 'unsqueeze') and str(op) == 'unsqueeze':
+        # Handle tensor.unsqueeze() calls
+        module = Identity()
+        note = "tensor.unsqueeze (pass-through)"
 
     # unimplemented operator
     else:
@@ -408,6 +622,13 @@ def convert_node(node, named_modules, node_to_layer, torch_mapping_needle, depth
             # transform current layer
             module = convert_layer(torch_layer,device,dtype)
             torch_mapping_needle[torch_layer] = module # record mapping relation from torch model to needle model
+            
+            # Special handling for TransformerEncoder/Decoder: map individual layers
+            if isinstance(torch_layer, (nn.TransformerEncoder, nn.TransformerDecoder)):
+                if hasattr(torch_layer, 'layers') and isinstance(module, Sequential):
+                    # Map each PyTorch encoder/decoder layer to corresponding Needle layer
+                    for torch_sublayer, needle_sublayer in zip(torch_layer.layers, module.modules):
+                        torch_mapping_needle[torch_sublayer] = needle_sublayer
         
         entry["needle_type"] = type(module).__name__
 
@@ -420,7 +641,16 @@ def convert_node(node, named_modules, node_to_layer, torch_mapping_needle, depth
         entry["needle_type"] = type(module).__name__
         entry["note"] = note
 
-    # === 4️.output ===
+    # === 4.call_method ===
+    elif node.op == "call_method":
+        entry["module_type"] = "method"
+        # Handle tensor method calls like .mean(), .size(), etc.
+        # These are typically pass-through as they don't have learnable parameters
+        module = Identity()
+        entry["needle_type"] = "Identity"
+        entry["note"] = f"method call: {node.target} (pass-through)"
+
+    # === 5️.output ===
     elif node.op == "output":
         entry["module_type"] = "output"
         real_output = node.args

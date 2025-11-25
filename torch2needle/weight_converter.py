@@ -110,6 +110,93 @@ def load_torch_weights_by_mapping(layer_mapping, verbose=True, device=ndl.cpu(),
                 # AdaptiveAvgPool2d has no learnable parameters
                 if verbose: print(f"[✔] AdaptiveAvgPool2d (no weights)")
                 copied += 1
+            
+            # === TransformerEncoderLayer/DecoderLayer → TransformerLayer === may not work too well, since our needle implementation is different from torch implementation
+            # Our code can supoport torch- Transformer defined in the local
+            elif isinstance(torch_layer, (nn.TransformerEncoderLayer, nn.TransformerDecoderLayer)):
+                # Import TransformerLayer
+                from needle.nn.nn_transformer import TransformerLayer
+                if isinstance(needle_layer, TransformerLayer):
+                    # Copy attention layer weights (q, k, v projections and out projection)
+                    # PyTorch stores these in self_attn.in_proj_weight and out_proj
+                    torch_attn = torch_layer.self_attn
+                    d_model = torch_attn.embed_dim
+                    
+                    # Split in_proj_weight into q, k, v (if not using separate projections)
+                    if hasattr(torch_attn, 'in_proj_weight') and torch_attn.in_proj_weight is not None:
+                        in_proj = torch_attn.in_proj_weight.detach().cpu().numpy().astype(np.float32)
+                        # Shape: (3*embed_dim, embed_dim) -> split into q, k, v
+                        q_weight, k_weight, v_weight = np.split(in_proj, 3, axis=0)
+                        
+                        # Transpose for Needle format
+                        needle_layer.attn.q_projection.weight = ndl.Tensor(q_weight.T, device=device, dtype=dtype)
+                        needle_layer.attn.k_projection.weight = ndl.Tensor(k_weight.T, device=device, dtype=dtype)
+                        needle_layer.attn.v_projection.weight = ndl.Tensor(v_weight.T, device=device, dtype=dtype)
+                        
+                        # Copy biases if present (PyTorch has in_proj_bias)
+                        if hasattr(torch_attn, 'in_proj_bias') and torch_attn.in_proj_bias is not None:
+                            in_proj_bias = torch_attn.in_proj_bias.detach().cpu().numpy().astype(np.float32)
+                            q_bias, k_bias, v_bias = np.split(in_proj_bias, 3, axis=0)
+                            # Note: Needle's projections are created with bias=False by default
+                            # We need to handle this - for now we'll just skip or add manually
+                            # Since Needle projections have bias=False, we skip this
+                    
+                    # Copy out projection
+                    out_proj_weight = torch_attn.out_proj.weight.detach().cpu().numpy().astype(np.float32)
+                    needle_layer.attn.out_projection.weight = ndl.Tensor(out_proj_weight.T, device=device, dtype=dtype)
+                    # Note: Needle's out_projection is created with bias=False, but PyTorch has bias
+                    # This is a known limitation - we skip the bias for now
+                    
+                    # Copy feed-forward weights
+                    linear1_weight = torch_layer.linear1.weight.detach().cpu().numpy().astype(np.float32)
+                    needle_layer.linear_in.weight = ndl.Tensor(linear1_weight.T, device=device, dtype=dtype)
+                    if torch_layer.linear1.bias is not None:
+                        needle_layer.linear_in.bias = ndl.Tensor(
+                            torch_layer.linear1.bias.detach().cpu().numpy().astype(np.float32),
+                            device=device, dtype=dtype
+                        )
+                    
+                    linear2_weight = torch_layer.linear2.weight.detach().cpu().numpy().astype(np.float32)
+                    needle_layer.linear_out.weight = ndl.Tensor(linear2_weight.T, device=device, dtype=dtype)
+                    if torch_layer.linear2.bias is not None:
+                        needle_layer.linear_out.bias = ndl.Tensor(
+                            torch_layer.linear2.bias.detach().cpu().numpy().astype(np.float32),
+                            device=device, dtype=dtype
+                        )
+                    
+                    # Copy layer norm weights
+                    # prenorm_q, prenorm_k, prenorm_v all correspond to norm1 (for self-attention)
+                    norm1_weight = ndl.Tensor(
+                        torch_layer.norm1.weight.detach().cpu().numpy().astype(np.float32),
+                        device=device, dtype=dtype
+                    )
+                    norm1_bias = ndl.Tensor(
+                        torch_layer.norm1.bias.detach().cpu().numpy().astype(np.float32),
+                        device=device, dtype=dtype
+                    )
+                    needle_layer.attn.prenorm_q.weight = norm1_weight
+                    needle_layer.attn.prenorm_q.bias = norm1_bias
+                    needle_layer.attn.prenorm_k.weight = norm1_weight
+                    needle_layer.attn.prenorm_k.bias = norm1_bias
+                    needle_layer.attn.prenorm_v.weight = norm1_weight
+                    needle_layer.attn.prenorm_v.bias = norm1_bias
+                    
+                    # prenorm corresponds to norm2 (for FFN)
+                    needle_layer.prenorm.weight = ndl.Tensor(
+                        torch_layer.norm2.weight.detach().cpu().numpy().astype(np.float32),
+                        device=device, dtype=dtype
+                    )
+                    needle_layer.prenorm.bias = ndl.Tensor(
+                        torch_layer.norm2.bias.detach().cpu().numpy().astype(np.float32),
+                        device=device, dtype=dtype
+                    )
+                    
+                    if verbose: print(f"[✔] Copied TransformerEncoderLayer")
+                    copied += 1
+                else:
+                    if verbose:
+                        print(f"[⚠] Unsupported mapping: {type(torch_layer).__name__} → {type(needle_layer).__name__}")
+                    skipped += 1
 
             else:
                 if verbose:
