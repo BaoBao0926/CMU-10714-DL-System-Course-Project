@@ -24,7 +24,7 @@ import operator
 
 
 # Torch2Needle, starter function
-def torch2needle_fx(torch_model,device,dtype):
+def torch2needle_fx(torch_model, device=nd.cpu(), dtype="float32"):
     traced = symbolic_trace(torch_model)
     print(traced)
     named_modules = dict(traced.named_modules())
@@ -33,8 +33,12 @@ def torch2needle_fx(torch_model,device,dtype):
     # this is used for weight converter
     torch_mapping_needle = {}
 
-    output_node = list(traced.graph.nodes)[-1]
-    _, trace_log = convert_node(output_node, named_modules, node_to_layer, torch_mapping_needle,device=device,dtype=dtype)
+    # 转换所有节点，而不仅仅是从输出节点开始
+    trace_log = []
+    for node in traced.graph.nodes:
+        if node.name not in node_to_layer:
+            _, trace_log = convert_node(node, named_modules, node_to_layer, torch_mapping_needle, 
+                                       depth=0, parent=None, trace_log=trace_log, device=device, dtype=dtype)
 
     # add sequential modules to current torch-mapping-needle mapping relation
     populate_sequential_mapping(torch_model, named_modules, torch_mapping_needle)
@@ -354,7 +358,7 @@ def convert_function_node(node, named_modules, node_to_layer, torch_mapping_need
     return module, note, trace_log
 
 # main Torch2Needle converter
-def convert_node(node, named_modules, node_to_layer, torch_mapping_needle, depth=0, parent=None, trace_log=None,device=nd.cpu(),dtype="float32"):
+def convert_node(node, named_modules, node_to_layer, torch_mapping_needle, depth=0, parent=None, trace_log=None,device=nd.cpu(), dtype="float32"):
     if trace_log is None:
         trace_log = []
 
