@@ -7,7 +7,14 @@ import torch.nn as nn
 import needle as ndl
 from needle import backend_ndarray as nd
 from needle.nn.nn_basic import Linear, BatchNorm1d, LayerNorm1d, BatchNorm2d, ReLU
-from needle.nn.nn_conv import Conv, MaxPool2d, AdaptiveAvgPool2d
+from needle.nn.nn_conv import Conv
+
+# Try to import optional pooling layers
+try:
+    from needle.nn.nn_conv import MaxPool2d, AdaptiveAvgPool2d
+except ImportError:
+    MaxPool2d = None
+    AdaptiveAvgPool2d = None
 
 # 尝试导入 torch_models 和 torch2needle_converter（仅用于测试）
 try:
@@ -93,13 +100,13 @@ def load_torch_weights_by_mapping(layer_mapping, verbose=True, device=ndl.cpu(),
                 copied += 1
             
             # === MaxPool2d (no weights to copy) ===
-            elif isinstance(torch_layer, nn.MaxPool2d) and isinstance(needle_layer, MaxPool2d):
+            elif MaxPool2d is not None and isinstance(torch_layer, nn.MaxPool2d) and isinstance(needle_layer, MaxPool2d):
                 # MaxPool2d has no learnable parameters
                 if verbose: print(f"[✔] MaxPool2d (no weights)")
                 copied += 1
             
             # === AdaptiveAvgPool2d (no weights to copy) ===
-            elif isinstance(torch_layer, nn.AdaptiveAvgPool2d) and isinstance(needle_layer, AdaptiveAvgPool2d):
+            elif AdaptiveAvgPool2d is not None and isinstance(torch_layer, nn.AdaptiveAvgPool2d) and isinstance(needle_layer, AdaptiveAvgPool2d):
                 # AdaptiveAvgPool2d has no learnable parameters
                 if verbose: print(f"[✔] AdaptiveAvgPool2d (no weights)")
                 copied += 1
