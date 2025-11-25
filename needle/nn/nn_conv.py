@@ -49,3 +49,26 @@ class Conv(Module):
             x += bias
         return x.transpose((0,3,1,2))
         ### END YOUR SOLUTION
+
+class MaxPool2d(Module):
+    """
+    Multi-channel Maxpool 2d layer
+    """
+    def __init__(self,kernel_size=3,stride=1,padding=0):
+        super().__init__()
+        self.kernel_size = kernel_size
+        self.stride = stride
+        self.pad = padding
+    def forward(self,x:Tensor)->Tensor:
+        return ops.max_pool2d(x,self.kernel_size,self.stride,self.pad)
+
+class AdaptiveAvgPool2d(Module):
+    """
+    Multi-channel AdaptiveAvgPool 2d layer
+    """
+    def __init__(self,output_size=(1,1)):
+        super().__init__()
+        self.output_size = output_size
+    def forward(self,x:Tensor)->Tensor:
+        return ops.adaptive_avg_pool2d(x,self.output_size)
+
