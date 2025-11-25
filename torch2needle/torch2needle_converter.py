@@ -1,8 +1,9 @@
 import sys, os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from needle.nn.nn_basic import Module, Identity, Linear, Flatten, ReLU, Sequential, BatchNorm1d, LayerNorm1d, Dropout, Residual, SoftmaxLoss
+from needle.nn.nn_basic import Module, Identity, Linear, Flatten, ReLU, Sequential, BatchNorm1d, LayerNorm1d, Dropout, BatchNorm2d
 from needle.nn.nn_basic import ADD, SUB
+from needle.nn.nn_conv import Conv, MaxPool2d, AdaptiveAvgPool2d
 from needle.nn.nn_transformer import MultiHeadAttention, AttentionLayer, TransformerLayer, Transformer
 from needle.nn.nn_sequence import Embedding
 import needle as nd
@@ -328,12 +329,31 @@ def convert_layer(layer,device,dtype):
         return Dropout(layer.p)
     elif isinstance(layer, nn.BatchNorm1d):
         return BatchNorm1d(layer.num_features,eps=layer.eps,momentum=layer.momentum,device=device,dtype=dtype)
+    elif isinstance(layer, nn.BatchNorm2d):
+        return BatchNorm2d(layer.num_features,eps=layer.eps,momentum=layer.momentum,device=device,dtype=dtype)
     elif isinstance(layer, nn.LayerNorm):
         return LayerNorm1d(layer.normalized_shape[0],device=device,dtype=dtype)
     elif isinstance(layer, nn.Identity):
         return Identity()
     elif isinstance(layer, nn.Sequential):
         return Sequential(*[convert_layer(m) for m in layer])
+    elif isinstance(layer, nn.Conv2d):
+        bias = False
+        if layer.bias is not None:
+            bias = True
+        return Conv(in_channels=layer.in_channels,
+                          out_channels=layer.out_channels,
+                          kernel_size=layer.kernel_size,
+                          stride=layer.stride,
+                          bias=bias,
+                          device=device,
+                          dtype=dtype)
+    elif isinstance(layer, nn.MaxPool2d):
+        return MaxPool2d(kernel_size=layer.kernel_size,
+                               stride=layer.stride,
+                               padding=layer.padding)
+    elif isinstance(layer, nn.AdaptiveAvgPool2d):
+        return AdaptiveAvgPool2d(output_size=layer.output_size)
     
     # Transformer components-may not work too well, since our needle implementation is different from torch implementation
     elif isinstance(layer, nn.MultiheadAttention):
