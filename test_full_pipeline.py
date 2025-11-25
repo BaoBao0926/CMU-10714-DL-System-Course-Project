@@ -226,14 +226,13 @@ def test_resnet_model(device=ndl.cpu(),dtype="float32"):
 
 if __name__ == "__main__":
     all_passed = True
-<<<<<<< Updated upstream
-    device = ndl.cpu()
+    # device = ndl.cpu() # this is correct, it is ndl.cpu() not ndl.numpy_cpu()
+    device = ndl.cuda()
     dtype = "float32"
     
     # 测试 1: 简单双分支模型
     print("\n" + "=" * 80)
     print("测试 1: 简单双分支模型")
-=======
     # device = ndl.cpu()  # this is correct, it is ndl.cpu() not ndl.numpy_cpu()
     device = ndl.cuda()
     dtype = "float32"
@@ -247,24 +246,17 @@ if __name__ == "__main__":
     
     # # 测试 2: ResNet 模型
     print("\n\n" + "=" * 80)
-    model = LinearResNetModel(input_dim=32, num_classes=10)
+    model = ResNetModel(input_dim=32, num_classes=10)
     print("测试 2: ResNet 模型（包含残差连接）")
     print("=" * 80)
     all_passed &= _run_pipeline_test(model,(5,32),device=device,dtype=dtype)
 
-    # 测试 3: ResNet18 模型
-    print("\n\n" + "=" * 80)
-    model = ResNetConv18(num_classes=10)
-    print("测试 3: ResNet18 模型")
->>>>>>> Stashed changes
-    print("=" * 80)
-    all_passed &= test_simple_model()
-    
-    # 测试 2: ResNet 模型
-    print("\n\n" + "=" * 80)
-    print("测试 2: ResNet 模型（包含残差连接）")
-    print("=" * 80)
-    all_passed &= test_resnet_model()
+    # # 测试 3: ResNet18 模型
+    # print("\n\n" + "=" * 80)
+    # model = ResNetConv18(num_classes=10)
+    # print("测试 3: ResNet18 模型")
+    # print("=" * 80)
+    # all_passed &= test_simple_model()
     
     # 总结
     print("\n\n" + "=" * 80)
