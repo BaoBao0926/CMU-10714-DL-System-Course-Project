@@ -17,6 +17,7 @@ from torch2needle.torch2needle_converter import torch2needle_fx
 from torch2needle.weight_converter import load_torch_weights_by_mapping
 from operator_fusion.operator_fusion import OperatorFusion
 
+from test_torch_model import ResNetConv18, SimpleTransformerModel
 
 # 创建一个简单的 PyTorch 模型（Sequential，适合融合）
 class SimpleTorchModel(nn.Module):
@@ -226,44 +227,44 @@ def test_resnet_model(device=ndl.cpu(),dtype="float32"):
 
 if __name__ == "__main__":
     all_passed = True
-    # device = ndl.cpu() # this is correct, it is ndl.cpu() not ndl.numpy_cpu()
-    device = ndl.cuda()
-    dtype = "float32"
-    
-    # 测试 1: 简单双分支模型
-    print("\n" + "=" * 80)
-    print("测试 1: 简单双分支模型")
-    # device = ndl.cpu()  # this is correct, it is ndl.cpu() not ndl.numpy_cpu()
-    device = ndl.cuda()
-    dtype = "float32"
-    
-    # # 测试 1: 简单双分支模型
-    print("\n" + "=" * 80)
-    print("测试 1: 简单双分支模型")
-    print("=" * 80)
-    model = SimpleTorchModel()
-    all_passed &= _run_pipeline_test(model,(5, 10),device,dtype)
-    
-    # # 测试 2: ResNet 模型
-    print("\n\n" + "=" * 80)
-    model = ResNetModel(input_dim=32, num_classes=10)
-    print("测试 2: ResNet 模型（包含残差连接）")
-    print("=" * 80)
-    all_passed &= _run_pipeline_test(model,(5,32),device=device,dtype=dtype)
+    for device in [ndl.cpu(), ndl.cuda()]:
+    # device = ndl.cpu()
+        dtype = "float32"
+        
+        # 测试 1: 简单双分支模型
+        print("\n" + "=" * 80)
+        print("测试 1: 简单双分支模型")
+        # device = ndl.cpu()  # this is correct, it is ndl.cpu() not ndl.numpy_cpu()
+        device = ndl.cuda()
+        dtype = "float32"
+        
+        # # 测试 1: 简单双分支模型
+        print("\n" + "=" * 80)
+        print("测试 1: 简单双分支模型")
+        print("=" * 80)
+        model = SimpleTorchModel()
+        all_passed &= _run_pipeline_test(model,(5, 10),device,dtype)
+        
+        # # 测试 2: ResNet 模型
+        print("\n\n" + "=" * 80)
+        model = ResNetModel(input_dim=32, num_classes=10)
+        print("测试 2: ResNet 模型（包含残差连接）")
+        print("=" * 80)
+        all_passed &= _run_pipeline_test(model,(5,32),device=device,dtype=dtype)
 
-    # # 测试 3: ResNet18 模型
-    # print("\n\n" + "=" * 80)
-    # model = ResNetConv18(num_classes=10)
-    # print("测试 3: ResNet18 模型")
-    # print("=" * 80)
-    # all_passed &= test_simple_model()
-    
-    # 总结
-    print("\n\n" + "=" * 80)
-    if all_passed:
-        print("🎉 所有测试通过！")
-    else:
-        print("❌ 部分测试失败")
-    print("=" * 80)
+        # # 测试 3: ResNet18 模型
+        print("\n\n" + "=" * 80)
+        model = ResNetConv18(num_classes=10)
+        print("测试 3: ResNet18 模型")
+        print("=" * 80)
+        all_passed &= test_simple_model()
+
+        # 总结
+        print("\n\n" + "=" * 80)
+        if all_passed:
+            print("🎉 所有测试通过！")
+        else:
+            print("❌ 部分测试失败")
+        print("=" * 80)
     
     sys.exit(0 if all_passed else 1)
