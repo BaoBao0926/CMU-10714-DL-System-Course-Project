@@ -166,7 +166,6 @@ class ResNetConv18(nn.Module):
         x = self.fc(x)
         return x
 
-
 class SimpleRNNModel(nn.Module):
     """基于 nn.RNN 的简单序列模型。输入 (batch, seq_len, input_size)。"""
     def __init__(self, input_size=32, hidden_size=64, num_layers=1, num_classes=10):

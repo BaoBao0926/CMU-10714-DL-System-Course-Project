@@ -41,6 +41,8 @@ class FusionPattern:
     融合模式的基类
     每个具体的融合模式都需要实现 match() 和 fuse() 方法
     """
+    # how many layers do fusion layer has been consumed
+    consumed_count:int
     def match(self, modules: List[Module], start_idx: int) -> bool:
         """
         检查从 start_idx 开始的模块序列是否匹配该融合模式
@@ -83,6 +85,7 @@ class LinearReLUPattern(FusionPattern):
         fused.weight = linear.weight
         if linear.bias is not None:
             fused.bias = linear.bias
+        self.consumed_count = 2
         return fused, 2  # 融合了 2 个模块
 
 
@@ -116,7 +119,7 @@ class LinearBatchNormPattern(FusionPattern):
         fused.bn_bias = bn.bias
         fused.running_mean = bn.running_mean
         fused.running_var = bn.running_var
-        
+        self.consumed_count = 2
         return fused, 2
 
 
@@ -137,7 +140,7 @@ class BatchNormReLUPattern(FusionPattern):
         fused.bias = bn.bias
         fused.running_mean = bn.running_mean
         fused.running_var = bn.running_var
-        
+        self.consumed_count = 2
         return fused, 2
 
 
@@ -173,7 +176,7 @@ class LinearBatchNormReLUPattern(FusionPattern):
         fused.bn_bias = bn.bias
         fused.running_mean = bn.running_mean
         fused.running_var = bn.running_var
-        
+        self.consumed_count = 3
         return fused, 3
 
 
@@ -218,7 +221,7 @@ class ConvBatchNorm2dReLUPattern(FusionPattern):
         fused.bn_bias = bn.bias
         fused.running_mean = bn.running_mean
         fused.running_var = bn.running_var
-        
+        self.consumed_count = 3
         return fused, 3
 
 
@@ -290,6 +293,6 @@ class MultiHeadAttentionPattern(FusionPattern):
         #     fused.k_proj_weight = mha.k_proj_weight
         # if hasattr(mha, 'v_proj_weight'):
         #     fused.v_proj_weight = mha.v_proj_weight
-        
+        self.consumed_count = 1
         return fused, 1
 
