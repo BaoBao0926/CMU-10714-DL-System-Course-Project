@@ -68,6 +68,14 @@ def cuda() -> BackendDevice:
     except ImportError:
         return BackendDevice("cuda", None)
 
+def hip() -> BackendDevice:
+    """Return hip device"""
+    try:
+        from . import ndarray_backend_hip  # type: ignore[attr-defined]
+
+        return BackendDevice("hip", ndarray_backend_hip)
+    except ImportError:
+        return BackendDevice("hip", None)
 
 def cpu_numpy() -> BackendDevice:
     """Return numpy device"""

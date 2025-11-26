@@ -1,5 +1,52 @@
 cmake_minimum_required(VERSION 3.5)
-project(needle C CXX)
+
+# ============================================================================
+# HIP/ROCm Configuration - Auto-detect and setup
+# ============================================================================
+
+# Try to detect ROCm/HIP installation
+if(DEFINED ENV{ROCM_HOME})
+  set(ROCM_HOME $ENV{ROCM_HOME})
+else()
+  set(ROCM_HOME "/opt/rocm")
+endif()
+
+# Check if HIP is available
+if(EXISTS "${ROCM_HOME}/bin/hipcc" AND EXISTS "${ROCM_HOME}/bin/amdclang++")
+  set(HIP_AVAILABLE TRUE)
+  message(STATUS "ROCm found at: ${ROCM_HOME}")
+else()
+  set(HIP_AVAILABLE FALSE)
+  message(WARNING "ROCm/HIP not found at ${ROCM_HOME}. HIP backend will not be compiled.")
+endif()
+
+# If HIP is available, setup compiler before project() declaration
+if(HIP_AVAILABLE)
+  # Set HIP compiler to clang (not hipcc wrapper)
+  if(NOT CMAKE_HIP_COMPILER)
+    set(CMAKE_HIP_COMPILER "${ROCM_HOME}/bin/amdclang++")
+  endif()
+  
+  # Use ROCm compilers for C/CXX
+  if(NOT CMAKE_C_COMPILER)
+    set(CMAKE_C_COMPILER "${ROCM_HOME}/bin/amdclang")
+  endif()
+  if(NOT CMAKE_CXX_COMPILER)
+    set(CMAKE_CXX_COMPILER "${ROCM_HOME}/bin/amdclang++")
+  endif()
+  
+  # Set CMAKE_PREFIX_PATH for HIP packages
+  list(APPEND CMAKE_PREFIX_PATH "${ROCM_HOME}/lib/cmake")
+  list(APPEND CMAKE_PREFIX_PATH "${ROCM_HOME}/hip/cmake")
+  
+  # Enable HIP language
+  enable_language(HIP)
+  set(LANGUAGES_TO_ENABLE "C;CXX;HIP")
+else()
+  set(LANGUAGES_TO_ENABLE "C;CXX")
+endif()
+
+project(needle ${LANGUAGES_TO_ENABLE})
 cmake_policy(SET CMP0146 OLD)
 
 # find correct version of Python
@@ -19,9 +66,12 @@ find_package(pybind11 PATHS ${__pybind_path})
 if(NOT MSVC)
   set(CMAKE_CXX_FLAGS "-std=c++11 -O2 -march=native ${CMAKE_CXX_FLAGS}")
   set(CMAKE_CUDA_STANDARD 14)
+  set(CMAKE_HIP_STANDARD 14)
+  set(CMAKE_HIP_FLAGS "-O2 ${CMAKE_HIP_FLAGS}")
 else()
   set(CMAKE_CXX_FLAGS "/std:c++11 -O2 -march=native ${CMAKE_CXX_FLAGS}")
   set(CMAKE_CUDA_STANDARD 14)
+  set(CMAKE_HIP_STANDARD 14)
 endif()
 
 include_directories(SYSTEM ${pybind11_INCLUDE_DIRS})
@@ -84,5 +134,54 @@ if(CUDA_FOUND)
     CUDA_VISIBILITY_PRESET "hidden"
 )
 
+else()
+  message(WARNING "CUDA not found or not compatible. CUDA backend will not be compiled.")
 endif()
+
+###################
+### HIP BACKEND ###
+###################
+if(HIP_AVAILABLE)
+  find_package(HIP REQUIRED)
+  message(STATUS "Found HIP, building HIP backend for AMD GPU")
+
+  include_directories(SYSTEM ${HIP_INCLUDE_DIRS})
+
+  # Set HIP compiler flags
+  set(HIP_HIPCC_FLAGS "-std=c++14 -O2")
+  set(CMAKE_HIP_FLAGS "${HIP_HIPCC_FLAGS} ${CMAKE_HIP_FLAGS}")
+
+  # Auto-detect AMD GPU architecture
+  execute_process(COMMAND "${ROCM_HOME}/bin/rocm-smi" "--showid" ERROR_QUIET RESULT_VARIABLE AMD_RET OUTPUT_QUIET)
+  if(AMD_RET EQUAL "0")
+    message(STATUS "AMD GPU detected, HIP will auto-detect architecture")
+  else()
+    message(STATUS "No AMD GPU detected, using gfx900 as default (Fiji/MI25)")
+    set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} --offload-arch=gfx900")
+  endif()
+
+  # Add HIP module
+  add_library(ndarray_backend_hip MODULE src/ndarray_backend_hip.cpp)
+
+  # Set HIP as the language for this file
+  set_source_files_properties(src/ndarray_backend_hip.cpp PROPERTIES LANGUAGE HIP)
+
+  target_link_libraries(ndarray_backend_hip PUBLIC ${LINKER_LIBS} hip::host hip::device)
+  pybind11_extension(ndarray_backend_hip)
+  pybind11_strip(ndarray_backend_hip)
+
+  # Output to backend folder
+  set_target_properties(ndarray_backend_hip
+    PROPERTIES
+    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/needle/backend_ndarray
+    HIP_VISIBILITY_PRESET "hidden"
+    PREFIX ""
+  )
+  
+  message(STATUS "✓ HIP backend will be compiled")
+else()
+  message(STATUS "✗ HIP backend will NOT be compiled (ROCm not found)")
+endif()
+
+
 

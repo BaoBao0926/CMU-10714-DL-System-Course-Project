@@ -8,8 +8,11 @@ import mugrade
 import itertools
 
 
-_DEVICES = [ndl.cpu(), pytest.param(ndl.cuda(),
-    marks=pytest.mark.skipif(not ndl.cuda().enabled(), reason="No GPU"))]
+_DEVICES = [ndl.cpu(), 
+            pytest.param(ndl.hip(), marks=pytest.mark.skipif(not ndl.hip().enabled(), reason="No AMD GPU"))
+    #         pytest.param(ndl.cuda(),
+    # marks=pytest.mark.skipif(not ndl.cuda().enabled(), reason="No GPU"))
+    ]
 
 def backward_check(f, *args, **kwargs):
     eps = 1e-3
@@ -627,8 +630,8 @@ def Rand(*shape, device=ndl.cpu(), entropy=1):
 
 
 def RandC(*shape, entropy=1):
-    if ndl.cuda().enabled():
-        return Rand(*shape, device=ndl.cuda(), entropy=2)
+    if ndl.hip().enabled():
+        return Rand(*shape, device=ndl.hip(), entropy=2)
     else:
         raise NotImplementedError("You need a GPU to run these tests.")
 
@@ -667,9 +670,9 @@ def submit_conv_forward():
     MugradeSubmit(DoConvLayer(1, 1, 3, 12, k=7, stride=4, bias=False))
 
 
-    if ndl.cuda().enabled():
-        MugradeSubmit(DoConvLayer(3, 2, 4, 6, k=3, stride=1, bias=False, device=ndl.cuda()))
-        MugradeSubmit(DoConvLayer(3, 4, 2, 6, k=3, stride=1, bias=False, device=ndl.cuda()))
+    if ndl.hip().enabled():
+        MugradeSubmit(DoConvLayer(3, 2, 4, 6, k=3, stride=1, bias=False, device=ndl.hip()))
+        MugradeSubmit(DoConvLayer(3, 4, 2, 6, k=3, stride=1, bias=False, device=ndl.hip()))
     else:
         print('You need a GPU to run these tests!')
 
@@ -718,9 +721,9 @@ def submit_conv_backward():
     MugradeSubmit(DoConvLayerBackward(1, 2, 1, 12, k=7, stride=1, bias=False, wrtX=False))
     MugradeSubmit(DoConvLayerBackward(1, 1, 3, 12, k=7, stride=4, bias=False, wrtX=False))
 
-    if ndl.cuda().enabled():
-        MugradeSubmit(DoConvLayerBackward(3, 2, 4, 6, k=3, stride=1, bias=False, wrtX=True, device=ndl.cuda()))
-        MugradeSubmit(DoConvLayerBackward(3, 4, 2, 6, k=3, stride=1, bias=False, wrtX=False, device=ndl.cuda()))
+    if ndl.hip().enabled():
+        MugradeSubmit(DoConvLayerBackward(3, 2, 4, 6, k=3, stride=1, bias=False, wrtX=True, device=ndl.hip()))
+        MugradeSubmit(DoConvLayerBackward(3, 4, 2, 6, k=3, stride=1, bias=False, wrtX=False, device=ndl.hip()))
     else:
         print('You need a GPU to run these tests!')
 
