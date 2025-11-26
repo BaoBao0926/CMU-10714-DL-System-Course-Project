@@ -1,7 +1,7 @@
 #!/bin/bash
 echo "Start transfer CUDA code to HIP..."
 
-# 获取python路径
+# get python path
 PYTHON_INCLUDES=$(python3-config --includes | cut -d' ' -f1 | sed 's/-I//')
 
 hipify-clang src/ndarray_backend_cuda.cu \

@@ -9,7 +9,7 @@ git clone https://github.com/BaoBao0926/CMU-10714-DL-System-Course-Project.git
 
 You are free to build developer environment by both conda or uv, but you should make sure the environment is running on linux (either x86 Ubuntu systems or Windows WSL). 
 
-If you are a window system user, please make sure your computer has WSL. You can refer to the guideline at here: https://www.bilibili.com/video/BV1tW42197za/?spm_id_from=333.1007.top_right_bar_window_default_collection.content.click
+If you are a window system user, please make sure your computer has WSL. You can refer to the [guideline](https://www.bilibili.com/video/BV1tW42197za/?spm_id_from=333.1007.top_right_bar_window_default_collection.content.click) at bilibili.
 
 You are free to build the environment by conda or uv
 
@@ -109,6 +109,23 @@ If you want to add one more fused operator, you should add:
   - @shuaiwei, write C++ code for each fusd operator in needle/ops/ops_fused.py
 
 ## Optimization on AMD GPU
+
+Here includes anything you'd love to know about running torch2needle at AMD GPU! Once you have a `.cu` file, you are free to deploy your backend implementation to AMD GPUs! 
+
+This AMD GPUs implementation is verified at **Ubuntu 24.04 LTS** image.
+
+Before compile, please make sure your system has `rocm` and `hipify-clang`, you can download them via [AMD ROCm introduction documentation](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/install/quick-start.html)
+
+Once you've checked your rocm and hipify-clang, please specify your `cuda-path` in `hipify-script.sh`, then, run `hipify-script.sh` in this command:
+
+```bash
+sh hipify-script.sh
+```
+
+if success, you'll find a hip version of your cuda code is generated in `src` directory! 
+
+All you need to do is run `make` and make & cmake will compile everything for you！
+
 
 **TODO**:
   - @shuaiwei, good luck to you
