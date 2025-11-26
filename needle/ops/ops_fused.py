@@ -20,7 +20,7 @@ These functions are designed to:
 
 from typing import Optional
 from ..autograd import Tensor
-from .ops_mathematic import matmul, broadcast_to, summation, reshape, relu, multiply, add
+from .ops_mathematic import matmul, broadcast_to, summation, reshape, relu, multiply, add, conv
 import numpy as np
 
 
@@ -278,10 +278,108 @@ def fused_linear_batchnorm_relu(
     return relu(out)
 
 
+def fused_conv_batchnorm2d_relu(
+    x: Tensor,
+    weight: Tensor,
+    conv_bias: Optional[Tensor],
+    bn_weight: Tensor,
+    bn_bias: Tensor,
+    running_mean: Tensor,
+    running_var: Tensor,
+    stride: int = 1,
+    padding: int = 1,
+    eps: float = 1e-5,
+    momentum: float = 0.1,
+    training: bool = True,
+) -> Tensor:
+    """
+    Fused Conv2d + BatchNorm2d + ReLU activation.
+    
+    Computes: ReLU(BatchNorm2d(Conv2d(x)))
+    
+    This is the most common building block in modern CNNs like ResNet, MobileNet, EfficientNet.
+    Fusion provides significant benefits:
+    1. Eliminates two intermediate feature map allocations (saves 2x memory bandwidth)
+    2. Better cache/shared memory utilization in GPU
+    3. Enables kernel fusion for 2-3x speedup in practice
+    4. Critical for efficient inference on edge devices
+    
+    Args:
+        x: Input tensor in NCHW format, shape (batch_size, in_channels, height, width)
+        weight: Conv weight of shape (kernel_size, kernel_size, in_channels, out_channels)
+        conv_bias: Optional conv bias of shape (out_channels,)
+        bn_weight: BatchNorm scale (gamma) of shape (out_channels,)
+        bn_bias: BatchNorm shift (beta) of shape (out_channels,)
+        running_mean: Running mean of shape (out_channels,)
+        running_var: Running variance of shape (out_channels,)
+        stride: Convolution stride
+        padding: Convolution padding
+        eps: Small constant for numerical stability in BatchNorm
+        momentum: Momentum for running statistics update
+        training: Training vs eval mode
+    
+    Returns:
+        Output tensor in NCHW format with ReLU applied
+    
+    Note:
+        Input/output are in NCHW format for consistency with Conv module.
+        Internally converts to NHWC for conv operation, then back to NCHW.
+    """
+    # Convert from NCHW to NHWC for conv operation
+    x_nhwc = x.transpose((0, 2, 3, 1))  # N,C,H,W -> N,H,W,C
+    
+    # Convolution
+    out = conv(x_nhwc, weight, stride=stride, padding=padding)
+    
+    # Add conv bias if provided
+    if conv_bias is not None:
+        bias_broadcast = broadcast_to(conv_bias, out.shape)
+        out = out + bias_broadcast
+    
+    # Convert back to NCHW for BatchNorm2d
+    out_nchw = out.transpose((0, 3, 1, 2))  # N,H,W,C -> N,C,H,W
+    
+    # BatchNorm2d: process as (N*H*W, C)
+    N, C, H, W = out_nchw.shape
+    
+    # Reshape to (N*H*W, C) for batch norm computation
+    out_reshaped = out_nchw.transpose((1, 2)).transpose((2, 3)).reshape((N * H * W, C))
+    
+    if training:
+        # Compute batch statistics across N*H*W dimension
+        batch_size = N * H * W
+        mean = summation(out_reshaped, axes=0, keepdims=True) / batch_size  # shape: (1, C)
+        mean_broadcast = broadcast_to(mean, out_reshaped.shape)
+        
+        var = summation((out_reshaped - mean_broadcast) ** 2, axes=0, keepdims=True) / batch_size
+        std_broadcast = broadcast_to((var + eps) ** 0.5, out_reshaped.shape)
+        
+        # Normalize
+        out_normalized = (out_reshaped - mean_broadcast) / std_broadcast
+    else:
+        # Use running statistics
+        test_mean = broadcast_to(reshape(running_mean, (1, C)), out_reshaped.shape)
+        test_std = broadcast_to(reshape((running_var + eps) ** 0.5, (1, C)), out_reshaped.shape)
+        out_normalized = (out_reshaped - test_mean) / test_std
+    
+    # Apply affine transformation
+    weight_broadcast = broadcast_to(reshape(bn_weight, (1, C)), out_normalized.shape)
+    bias_broadcast = broadcast_to(reshape(bn_bias, (1, C)), out_normalized.shape)
+    out_bn = weight_broadcast * out_normalized + bias_broadcast
+    
+    # Reshape back to NCHW
+    out_bn_reshaped = out_bn.reshape((N, H, W, C))
+    out_final = out_bn_reshaped.transpose((2, 3)).transpose((1, 2))  # N,H,W,C -> N,C,H,W
+    
+    # Apply ReLU activation
+    return relu(out_final)
+
+
 # Export all fused operations
 __all__ = [
     'fused_linear_relu',
     'fused_batchnorm_relu', 
     'fused_linear_batchnorm',
     'fused_linear_batchnorm_relu',
+    'fused_conv_batchnorm2d_relu',
 ]
