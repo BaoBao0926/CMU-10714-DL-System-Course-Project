@@ -6,6 +6,7 @@ from needle import ops
 import needle.init as init
 import numpy as np
 from .nn_basic import Parameter, Module
+from needle.needle_profiling import profile_operation
 
 
 class Conv(Module):
@@ -39,6 +40,7 @@ class Conv(Module):
             self.bias = Parameter(bias_data)
         ### END YOUR SOLUTION
 
+    @profile_operation
     def forward(self, x: Tensor) -> Tensor:
         ### BEGIN YOUR SOLUTION
         x = x.transpose((0,2,3,1)) # N,C,H,W -> N,H,W,C

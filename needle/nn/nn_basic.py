@@ -6,6 +6,7 @@ from needle import ops
 import needle.init as init
 import numpy as np
 
+from needle.needle_profiling import profile_operation
 
 class Parameter(Tensor):
     """A special kind of tensor that represents parameters."""
@@ -90,7 +91,7 @@ class Linear(Module):
         if bias:
             self.bias = Parameter(init.kaiming_uniform(out_features,1,requires_grad=True,device=device,dtype=dtype).reshape((1,out_features)))
         ### END YOUR SOLUTION
-
+    @profile_operation
     def forward(self, X: Tensor) -> Tensor:
         ### BEGIN YOUR SOLUTION
         output = X.matmul(self.weight)
@@ -105,6 +106,7 @@ class Linear(Module):
 
 
 class Flatten(Module):
+    @profile_operation
     def forward(self, X: Tensor) -> Tensor:
         ### BEGIN YOUR SOLUTION
         return X.reshape((X.shape[0],-1))
@@ -112,6 +114,7 @@ class Flatten(Module):
 
 
 class ReLU(Module):
+    @profile_operation
     def forward(self, x: Tensor) -> Tensor:
         ### BEGIN YOUR SOLUTION
         return ops.relu(x)
@@ -122,6 +125,7 @@ class Sequential(Module):
         super().__init__()
         self.modules = modules
 
+    @profile_operation
     def forward(self, x: Tensor) -> Tensor:
         ### BEGIN YOUR SOLUTION
         for module in self.modules:
@@ -131,6 +135,7 @@ class Sequential(Module):
 
 
 class SoftmaxLoss(Module):
+    @profile_operation
     def forward(self, logits: Tensor, y: Tensor) -> Tensor:
         ### BEGIN YOUR SOLUTION
         one_hot = init.one_hot(logits.shape[1],y,device=logits.device)
@@ -155,6 +160,7 @@ class BatchNorm1d(Module):
         self.running_var = init.ones(dim, device=device, dtype=dtype, requires_grad=False)
         ### END YOUR SOLUTION
 
+    @profile_operation
     def forward(self, x: Tensor) -> Tensor:
         ### BEGIN YOUR SOLUTION
         batch, *_ = x.shape
@@ -202,6 +208,7 @@ class BatchNorm2d(BatchNorm1d):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
+    @profile_operation
     def forward(self, x: Tensor):
         # nchw -> nhcw -> nhwc
         s = x.shape
@@ -220,6 +227,7 @@ class LayerNorm1d(Module):
         self.bias = Parameter(init.zeros(dim, device=device, dtype=dtype, requires_grad=True))
         ### END YOUR SOLUTION
 
+    @profile_operation
     def forward(self, x: Tensor) -> Tensor:
         ### BEGIN YOUR SOLUTION
         reduce_shape = x.shape[:-1] + (1,)
@@ -236,6 +244,7 @@ class Dropout(Module):
         super().__init__()
         self.p = p
 
+    @profile_operation
     def forward(self, x: Tensor) -> Tensor:
         ### BEGIN YOUR SOLUTION
         if(self.training):
@@ -253,6 +262,7 @@ class Residual(Module):
         super().__init__()
         self.fn = fn
 
+    @profile_operation
     def forward(self, x: Tensor) -> Tensor:
         ### BEGIN YOUR SOLUTION
         return self.fn(x) + x
@@ -263,7 +273,7 @@ class ADD(Module):
         super().__init__()
         self.left = left
         self.right = right
-
+    @profile_operation
     def forward(self, x):
         return self.left(x) + self.right(x)
 
@@ -272,6 +282,6 @@ class SUB(Module):
         super().__init__()
         self.left = left
         self.right = right
-
+    @profile_operation
     def forward(self, x: Tensor) -> Tensor:
         return self.left(x) - self.right(x)
