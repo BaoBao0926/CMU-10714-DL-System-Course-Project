@@ -13,6 +13,7 @@ if BACKEND == "nd":
         cuda,
         cpu,
         cpu_numpy,
+        hip,
         default_device,
         BackendDevice as Device,
     )

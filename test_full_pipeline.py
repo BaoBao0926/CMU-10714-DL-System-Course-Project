@@ -208,34 +208,10 @@ def _run_pipeline_test(torch_model, input_shape,device=ndl.cpu(),dtype="fl"):
     return True
 
 
-
-def test_simple_model(device=ndl.cpu(),dtype="float32"):
-    """测试简单的双分支模型"""
-    print("=" * 80)
-    print("测试 1: 简单双分支模型")
-    print("=" * 80)
-    return _run_pipeline_test(SimpleTorchModel(), (5, 10),device,dtype)
-
-
-def test_resnet_model(device=ndl.cpu(),dtype="float32"):
-    """测试 ResNet 模型"""
-    print("\n" + "=" * 80)
-    print("测试 2: ResNet 模型")
-    print("=" * 80)
-    return _run_pipeline_test(ResNetModel(input_dim=32, num_classes=10), (5, 32),device,dtype)
-
-
 if __name__ == "__main__":
     all_passed = True
     # device = ndl.cpu() # this is correct, it is ndl.cpu() not ndl.numpy_cpu()
-    device = ndl.cuda()
-    dtype = "float32"
-    
-    # 测试 1: 简单双分支模型
-    print("\n" + "=" * 80)
-    print("测试 1: 简单双分支模型")
-    # device = ndl.cpu()  # this is correct, it is ndl.cpu() not ndl.numpy_cpu()
-    device = ndl.cuda()
+    device = ndl.hip()
     dtype = "float32"
     
     # # # 测试 1: 简单双分支模型
@@ -258,7 +234,7 @@ if __name__ == "__main__":
     print("测试 3: ResNet18 模型")
     print("=" * 80)
     all_passed &= _run_pipeline_test(model,(2,3,32,32),device=device,dtype=dtype)
-    
+
     # 总结
     print("\n\n" + "=" * 80)
     if all_passed:

@@ -8,8 +8,11 @@ import mugrade
 import itertools
 
 
-_DEVICES = [ndl.cpu(), pytest.param(ndl.cuda(),
-    marks=pytest.mark.skipif(not ndl.cuda().enabled(), reason="No GPU"))]
+_DEVICES = [ndl.cpu(), 
+            pytest.param(ndl.hip(), marks=pytest.mark.skipif(not ndl.hip().enabled(), reason="No AMD GPU"))
+    #         pytest.param(ndl.cuda(),
+    # marks=pytest.mark.skipif(not ndl.cuda().enabled(), reason="No GPU"))
+    ]
 
 def backward_check(f, *args, **kwargs):
     eps = 1e-3
@@ -488,6 +491,129 @@ def one_iter_of_cifar10_training(dataloader, model, niter=1, loss_fn=ndl.nn.Soft
         i += 1
     return correct/(y.shape[0]*niter), total_loss/(y.shape[0]*niter)
 
+######################    |    ######################
+################## SELF-DEFINE TEST #################
+######################    v    ######################
+op_maxpool2d_shapes = [
+    ( (3, 8,14,14), 2, 2, 0 ),
+    ( (3, 8,14,14), 3, 2, 1 ),
+    ( (3, 8,16,16), 4, 2, 2 ),
+    ( (3, 8,16,16), 2, 2, 0 ),
+    ( (3, 2,16,16), 3, 1, 1 ),
+
+    ( (3, 8,14,14), 2, 1, 0 ),
+    ( (3, 8,14,14), 3, 1, 1 ),
+    ( (3, 8,16,16), 4, 1, 2 ),
+    ( (3, 8,16,16), 2, 1, 0 ),
+    ( (3, 2,16,16), 3, 1, 0 ),
+
+    ( (3, 24,16,16), 5, 2, 0 ),
+    ( (3, 8,14,14), 5, 1, 0 ),
+    ( (3, 8,17,17), 5, 1, 0 ),
+    ( (3, 1,17,17), 5, 1, 0 ),
+    ( (3, 16,17,17), 5, 1, 0 ),
+    ( (3, 16,17,17), 1, 1, 0 ),
+    ( (1, 2,14,14), 3, 1, 1 ),
+]
+@pytest.mark.parametrize("X_shape,kernel_size,stride,padding", op_maxpool2d_shapes)
+@pytest.mark.parametrize("device", _DEVICES)
+def test_op_maxpool2d(X_shape,kernel_size,stride,padding,device,backward=False):
+        np.random.seed(0)
+        import torch
+        _X = np.random.randn(*X_shape).astype(np.float32)
+        X = ndl.Tensor(_X, device=device)
+        y = ndl.max_pool2d(X, kernel_size=kernel_size, stride=stride, padding=padding)
+        y2 = y.sum()
+        if backward:
+            y2.backward()
+        Xtch = torch.Tensor(_X).float()
+        Xtch.requires_grad=True
+        out = torch.nn.functional.max_pool2d(Xtch, kernel_size=kernel_size, stride=stride, padding=padding)
+        out2 = out.sum()
+        if backward:
+            out2.backward()
+        if backward:
+            err1 = np.linalg.norm(Xtch.grad.numpy() - X.grad.numpy())
+        err3 = np.linalg.norm(out2.detach().numpy() - y2.numpy())
+        if backward:
+            assert err1 < 1e-2, "input grads match"
+        assert err3 < 1e-1, "outputs match %s, %s" % (y2, out2)
+
+op_adaptiveavgpool2d_shapes = [
+    ( (3, 8,14,14), (7,7), ),
+    ( (3, 8,15,15), (5,5), ),
+    ( (3, 8,16,16), (4,4), ),
+    ( (3, 8,16,16), (8,8), ),
+
+    ( (3, 8,9,9), (3,3), ),
+    ( (3, 8,14,14), (7,7), ),
+    ( (3, 8,16,16), (2,2), ),
+    ( (3, 8,16,16), (16,16), ),
+    ( (3, 2,10,10), (5,5), ),
+
+    ( (3, 24,14,14), (7,7), ),
+    ( (3, 8,18,18), (6,6), ),
+    ( (3, 8,25,25), (5,5), ),
+    ( (3, 1,18,18), (2,2), ),
+    ( (3, 16,16,16), (8,8), ),
+    ( (3, 16,17,17), (1,1), ),
+    ( (1, 2,12,12), (3,3), ),
+]
+@pytest.mark.parametrize("X_shape,output_size", op_adaptiveavgpool2d_shapes)
+@pytest.mark.parametrize("device", _DEVICES)
+def test_op_adaptiveavgpool2d(X_shape,output_size,device, backward=False):
+        np.random.seed(0)
+        import torch
+        _X = np.random.randn(*X_shape).astype(np.float32)
+        X = ndl.Tensor(_X, device=device)
+        y = ndl.adaptive_avg_pool2d(X, output_size=output_size)
+        y2 = y.sum()
+        if backward:
+            y2.backward()
+        Xtch = torch.Tensor(_X).float()
+        Xtch.requires_grad=True
+        out = torch.nn.functional.adaptive_avg_pool2d(Xtch, output_size=output_size)
+        out2 = out.sum()
+        if backward:
+            out2.backward()
+        if backward:
+            err1 = np.linalg.norm(Xtch.grad.numpy() - X.grad.numpy())
+        err3 = np.linalg.norm(out2.detach().numpy() - y2.numpy())
+        if backward:
+            assert err1 < 1e-2, "input grads match"
+        assert err3 < 1e-1, "outputs match %s, %s" % (y2, out2)
+
+@pytest.mark.parametrize("X_shape,k,stride,padding", op_maxpool2d_shapes)
+@pytest.mark.parametrize("device", _DEVICES)
+def test_nn_maxpool2d_forward(X_shape, k, stride, padding, device):
+    np.random.seed(0)
+    import torch
+    X_np = np.random.randn(*X_shape).astype(np.float32)
+    X = ndl.Tensor(X_np, device=device)
+    f = ndl.nn.MaxPool2d(kernel_size=k, stride=stride, padding=padding)
+    y = f(X)
+
+    Xtch = torch.Tensor(X_np).float()
+    g = torch.nn.MaxPool2d(kernel_size=k, stride=stride, padding=padding)
+    out = g(Xtch)
+
+    assert np.linalg.norm(y.cached_data.numpy() - out.detach().numpy()) < 1e-3
+
+@pytest.mark.parametrize("X_shape,output_size", op_adaptiveavgpool2d_shapes)
+@pytest.mark.parametrize("device", _DEVICES)
+def test_nn_adaptiveaveragepool2d_forward(X_shape, output_size, device):
+    np.random.seed(0)
+    import torch
+    X_np = np.random.randn(*X_shape).astype(np.float32)
+    X = ndl.Tensor(X_np, device=device)
+    f = ndl.nn.AdaptiveAvgPool2d(output_size=output_size)
+    y = f(X)
+
+    Xtch = torch.Tensor(X_np).float()
+    g = torch.nn.AdaptiveAvgPool2d(output_size=output_size)
+    out = g(Xtch)
+
+    assert np.linalg.norm(y.cached_data.numpy() - out.detach().numpy()) < 1e-3
 
 ######################    |    ######################
 ################## SELF-DEFINE TEST #################
@@ -628,8 +754,8 @@ def Rand(*shape, device=ndl.cpu(), entropy=1):
 
 
 def RandC(*shape, entropy=1):
-    if ndl.cuda().enabled():
-        return Rand(*shape, device=ndl.cuda(), entropy=2)
+    if ndl.hip().enabled():
+        return Rand(*shape, device=ndl.hip(), entropy=2)
     else:
         raise NotImplementedError("You need a GPU to run these tests.")
 
@@ -668,9 +794,9 @@ def submit_conv_forward():
     MugradeSubmit(DoConvLayer(1, 1, 3, 12, k=7, stride=4, bias=False))
 
 
-    if ndl.cuda().enabled():
-        MugradeSubmit(DoConvLayer(3, 2, 4, 6, k=3, stride=1, bias=False, device=ndl.cuda()))
-        MugradeSubmit(DoConvLayer(3, 4, 2, 6, k=3, stride=1, bias=False, device=ndl.cuda()))
+    if ndl.hip().enabled():
+        MugradeSubmit(DoConvLayer(3, 2, 4, 6, k=3, stride=1, bias=False, device=ndl.hip()))
+        MugradeSubmit(DoConvLayer(3, 4, 2, 6, k=3, stride=1, bias=False, device=ndl.hip()))
     else:
         print('You need a GPU to run these tests!')
 
@@ -719,9 +845,9 @@ def submit_conv_backward():
     MugradeSubmit(DoConvLayerBackward(1, 2, 1, 12, k=7, stride=1, bias=False, wrtX=False))
     MugradeSubmit(DoConvLayerBackward(1, 1, 3, 12, k=7, stride=4, bias=False, wrtX=False))
 
-    if ndl.cuda().enabled():
-        MugradeSubmit(DoConvLayerBackward(3, 2, 4, 6, k=3, stride=1, bias=False, wrtX=True, device=ndl.cuda()))
-        MugradeSubmit(DoConvLayerBackward(3, 4, 2, 6, k=3, stride=1, bias=False, wrtX=False, device=ndl.cuda()))
+    if ndl.hip().enabled():
+        MugradeSubmit(DoConvLayerBackward(3, 2, 4, 6, k=3, stride=1, bias=False, wrtX=True, device=ndl.hip()))
+        MugradeSubmit(DoConvLayerBackward(3, 4, 2, 6, k=3, stride=1, bias=False, wrtX=False, device=ndl.hip()))
     else:
         print('You need a GPU to run these tests!')
 
