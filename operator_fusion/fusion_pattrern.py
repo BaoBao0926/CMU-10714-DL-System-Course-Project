@@ -12,18 +12,21 @@ from needle.ops.ops_fused import (
 )
 import needle.init as init
 from needle.nn.nn_basic import (
-    Module, Linear, ReLU, Sequential, BatchNorm1d, 
+    Module, Linear, ReLU, Sequential, BatchNorm1d, BatchNorm2d,
     LayerNorm1d, Dropout, Identity, Flatten, Parameter
 )
+from needle.nn.nn_conv import Conv
 from typing import Any, List, Tuple, Optional
 
 try:
     from fused_layer import (
         LinearReLU, LinearBatchNorm, BatchNormReLU, LinearBatchNormReLU,
+        ConvBatchNorm2dReLU,
     )
 except ImportError:
     from operator_fusion.fused_layer import (
         LinearReLU, LinearBatchNorm, BatchNormReLU, LinearBatchNormReLU,
+        ConvBatchNorm2dReLU,
     )
 
 
@@ -171,3 +174,49 @@ class LinearBatchNormReLUPattern(FusionPattern):
         fused.running_var = bn.running_var
         
         return fused, 3
+
+
+class ConvBatchNorm2dReLUPattern(FusionPattern):
+    """Conv + BatchNorm2d + ReLU fusion pattern
+    
+    This is the fundamental building block in modern CNNs:
+    - ResNet: Basic and Bottleneck blocks
+    - MobileNet: Depthwise separable convolutions
+    - EfficientNet: MBConv blocks
+    - Most modern vision architectures
+    """
+    
+    def match(self, modules: List[Module], start_idx: int) -> bool:
+        if start_idx + 2 >= len(modules):
+            return False
+        if not isinstance(modules[start_idx], Conv):
+            return False
+        if not isinstance(modules[start_idx + 1], BatchNorm2d):
+            return False
+        if not isinstance(modules[start_idx + 2], ReLU):
+            return False
+        # Check dimension matching
+        conv = modules[start_idx]
+        bn = modules[start_idx + 1]
+        return conv.out_channels == bn.dim
+    
+    def fuse(self, modules: List[Module], start_idx: int) -> Tuple[Module, int]:
+        conv = modules[start_idx]
+        bn = modules[start_idx + 1]
+        
+        # Create fused module and copy parameters
+        fused = ConvBatchNorm2dReLU(
+            conv.in_channels, conv.out_channels, conv.kernel_size,
+            stride=conv.stride, bias=conv.bias is not None,
+            eps=bn.eps, momentum=bn.momentum
+        )
+        fused.weight = conv.weight
+        if conv.bias is not None:
+            fused.conv_bias = conv.bias
+        fused.bn_weight = bn.weight
+        fused.bn_bias = bn.bias
+        fused.running_mean = bn.running_mean
+        fused.running_var = bn.running_var
+        
+        return fused, 3
+

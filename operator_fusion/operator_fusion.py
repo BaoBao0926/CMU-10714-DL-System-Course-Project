@@ -20,21 +20,25 @@ from needle.ops.ops_fused import (
     fused_batchnorm_relu,
     fused_linear_batchnorm,
     fused_linear_batchnorm_relu,
+    fused_conv_batchnorm2d_relu,
 )
 import needle.init as init
 from needle.nn.nn_basic import (
-    Module, Linear, ReLU, Sequential, BatchNorm1d, 
+    Module, Linear, ReLU, Sequential, BatchNorm1d, BatchNorm2d,
     LayerNorm1d, Dropout, Identity, Flatten, Parameter
 )
+from needle.nn.nn_conv import Conv
 from typing import Any, List, Tuple, Optional
 
 try:
     from fusion_pattrern import (
-        FusionPattern, LinearReLUPattern, LinearBatchNormPattern, BatchNormReLUPattern, LinearBatchNormReLUPattern
+        FusionPattern, LinearReLUPattern, LinearBatchNormPattern, BatchNormReLUPattern, 
+        LinearBatchNormReLUPattern, ConvBatchNorm2dReLUPattern
     )
 except ImportError:
     from operator_fusion.fusion_pattrern import (
-        FusionPattern, LinearReLUPattern, LinearBatchNormPattern, BatchNormReLUPattern, LinearBatchNormReLUPattern
+        FusionPattern, LinearReLUPattern, LinearBatchNormPattern, BatchNormReLUPattern, 
+        LinearBatchNormReLUPattern, ConvBatchNorm2dReLUPattern
     )
 
 # ============================================================================
@@ -55,10 +59,11 @@ class OperatorFusion:
         """
         if patterns is None:
             self.patterns = patterns = [
-                LinearBatchNormReLUPattern(), 
-                LinearBatchNormPattern(),
-                LinearReLUPattern(),
-                BatchNormReLUPattern(),
+                ConvBatchNorm2dReLUPattern(),  # Conv+BN+ReLU (ResNet pattern)
+                LinearBatchNormReLUPattern(),  # Linear+BN+ReLU
+                LinearBatchNormPattern(),      # Linear+BN
+                LinearReLUPattern(),           # Linear+ReLU
+                BatchNormReLUPattern(),        # BN+ReLU
             ]
         else:
             self.patterns = patterns
