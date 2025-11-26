@@ -1,18 +1,24 @@
 # CMU-10714-DL-System-Course-Project
 This is the repository of course prohect of CMU course: 10714 Deep Learning System: Algotirhm and Implementation
 
+# 0.Environment Setup
 
+## 0.1 Clone Repo
 ```bash
 # clone the repo
 git clone https://github.com/BaoBao0926/CMU-10714-DL-System-Course-Project.git
 ```
-
+## 0.2 Environment on Linux (Ubuntu/WSL)
 You are free to build developer environment by both conda or uv, but you should make sure the environment is running on linux (either x86 Ubuntu systems or Windows WSL). 
 
 If you are a window system user, please make sure your computer has WSL. You can refer to the guideline at here: https://www.bilibili.com/video/BV1tW42197za/?spm_id_from=333.1007.top_right_bar_window_default_collection.content.click
 
+
+
+## 0.3 Environment Setup
 You are free to build the environment by conda or uv
 
+`Conda:`
 ```bash
 # config the environment
 conda create -n torch2needle python=3.10
@@ -24,7 +30,7 @@ conda activate torch2needle
 pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu126
 ```
 
-uv: 
+`uv: `
 ```bash
 # config the environment
 uv sync
@@ -36,10 +42,15 @@ source /your-path-to-project/.venv/bin/activate
 (10714-hw4) Username@Host:your-path-to-project/
 ```
 
-After you build the environment, please set global variable to:
+After you build the environment, please set global variable to(, which is optional):
 ```bash
 %set_env PYTHONPATH ./needle
 %set_env NEEDLE_BACKEND nd
+```
+To build the project, use the following commands in your terminal(especially you first clone this repo):
+```bash
+make reset
+make
 ```
 
 To test if your environment is run correctly, you can run pytest command in hw4.ipynb for verification, for example:
@@ -55,7 +66,7 @@ tests/hw4/test_sequence_models.py::test_language_model_implementation[cpu-rnn-1-
 ...
 ```
 
-## Torch2Needle
+## 1.Torch2Needle
 
 ```text
 torch2needle/
@@ -78,7 +89,7 @@ If you want to add one more operator, you should add:
 
 
 
-## Operaor Fusion
+## 2. Operaor Fusion
 
 ```text
 operator_fusion/
@@ -106,7 +117,7 @@ If you want to add one more fused operator, you should add:
 **TODO**:
   - @shuaiwei, write C++ code for each fusd operator in needle/ops/ops_fused.py
  
-## Optimization on AMD GPU
+## 3. Optimization on AMD GPU
 
 **TODO**:
   - @shuaiwei, good luck to you
