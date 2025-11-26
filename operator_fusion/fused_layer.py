@@ -10,6 +10,7 @@ from needle.ops.ops_fused import (
     fused_linear_batchnorm,
     fused_linear_batchnorm_relu,
     fused_conv_batchnorm2d_relu,
+    fused_multihead_attention,
 )
 import needle.init as init
 from needle.nn.nn_basic import (
@@ -88,6 +89,7 @@ class LinearBatchNorm(Module):
                                    device=device, dtype=dtype, requires_grad=False)
         self.running_var = Tensor(init.ones(out_features, device=device, dtype=dtype), 
                                   device=device, dtype=dtype, requires_grad=False)
+        self.training = True
 
     def forward(self, X: Tensor) -> Tensor:
         """Perform fused Linear + BatchNorm operation using fused op"""
@@ -180,6 +182,7 @@ class ConvBatchNorm2dReLU(Module):
                                    device=device, dtype=dtype, requires_grad=False)
         self.running_var = Tensor(init.ones(out_channels, device=device, dtype=dtype),
                                   device=device, dtype=dtype, requires_grad=False)
+        self.training = True
 
     def forward(self, x: Tensor) -> Tensor:
         """Perform fused Conv2d + BatchNorm2d + ReLU operation using fused op"""
@@ -209,17 +212,169 @@ class ConvBatchNorm2dReLU(Module):
             
             # Compute mean and variance
             batch_size = N * H * W
-            mean = summation(conv_out_reshaped, axes=0, keepdims=True) / batch_size
+            mean = conv_out_reshaped.sum(axes=0) / batch_size
             mean_broadcast = broadcast_to(mean, conv_out_reshaped.shape)
-            var = summation((conv_out_reshaped - mean_broadcast) ** 2, axes=0, keepdims=True) / batch_size
+            var = ((conv_out_reshaped - mean_broadcast) ** 2).sum(axes=0) / batch_size
             
             # Update running stats
             self.running_mean = ((1 - self.momentum) * self.running_mean +
-                               self.momentum * reshape(mean, self.out_channels).detach())
+                               self.momentum * mean.detach())
             self.running_var = ((1 - self.momentum) * self.running_var +
-                              self.momentum * reshape(var, self.out_channels).detach())
+                              self.momentum * var.detach())
         
         return out
+
+
+class FusedMultiHeadAttention(Module):
+    """
+    Fused Multi-Head Attention module inspired by FlashAttention.
+    
+    This module fuses the entire multi-head attention computation into a single
+    optimized operation, combining:
+    - Q, K, V projections (handled separately)
+    - Scaled dot-product attention
+    - Causal masking (if enabled)
+    - Softmax normalization
+    - Dropout
+    - Output aggregation
+    
+    Benefits:
+    - Reduced memory footprint (no intermediate attention matrix storage)
+    - Faster computation through kernel fusion
+    - Better numerical stability
+    - Essential for long-sequence transformers
+    
+    This is commonly used in:
+    - GPT-style autoregressive models (with causal=True)
+    - BERT-style bidirectional models (with causal=False)
+    - Vision Transformers
+    - Any transformer-based architecture
+    """
+    def __init__(
+        self,
+        embed_dim: int,
+        num_heads: int,
+        *,
+        dropout: float = 0.0,
+        causal: bool = False,
+        bias: bool = True,
+        device: Any | None = None,
+        dtype: str = "float32"
+    ) -> None:
+        super().__init__()
+        
+        assert embed_dim % num_heads == 0, f"embed_dim ({embed_dim}) must be divisible by num_heads ({num_heads})"
+        
+        self.embed_dim = embed_dim
+        self.num_heads = num_heads
+        self.dim_head = embed_dim // num_heads
+        self.dropout_prob = dropout
+        self.causal = causal
+        
+        # QKV projection weights (combined for efficiency)
+        # Standard practice: use separate projections for Q, K, V
+        self.q_proj_weight = Parameter(
+            init.kaiming_uniform(embed_dim, embed_dim, device=device, dtype=dtype)
+        )
+        self.k_proj_weight = Parameter(
+            init.kaiming_uniform(embed_dim, embed_dim, device=device, dtype=dtype)
+        )
+        self.v_proj_weight = Parameter(
+            init.kaiming_uniform(embed_dim, embed_dim, device=device, dtype=dtype)
+        )
+        
+        if bias:
+            self.q_proj_bias = Parameter(
+                init.zeros(embed_dim, device=device, dtype=dtype).reshape((1, embed_dim))
+            )
+            self.k_proj_bias = Parameter(
+                init.zeros(embed_dim, device=device, dtype=dtype).reshape((1, embed_dim))
+            )
+            self.v_proj_bias = Parameter(
+                init.zeros(embed_dim, device=device, dtype=dtype).reshape((1, embed_dim))
+            )
+        else:
+            self.q_proj_bias = None
+            self.k_proj_bias = None
+            self.v_proj_bias = None
+        
+        # Output projection
+        self.out_proj_weight = Parameter(
+            init.kaiming_uniform(embed_dim, embed_dim, device=device, dtype=dtype)
+        )
+        if bias:
+            self.out_proj_bias = Parameter(
+                init.zeros(embed_dim, device=device, dtype=dtype).reshape((1, embed_dim))
+            )
+        else:
+            self.out_proj_bias = None
+        self.training = True
+    
+    def forward(
+        self,
+        query: Tensor,
+        key: Optional[Tensor] = None,
+        value: Optional[Tensor] = None,
+    ) -> Tensor:
+        """
+        Forward pass of fused multi-head attention.
+        
+        Args:
+            query: Query tensor of shape (batch_size, seq_len, embed_dim)
+            key: Key tensor of shape (batch_size, seq_len_k, embed_dim). If None, uses query (self-attention)
+            value: Value tensor of shape (batch_size, seq_len_k, embed_dim). If None, uses query (self-attention)
+        
+        Returns:
+            Output tensor of shape (batch_size, seq_len, embed_dim)
+        """
+        # Handle self-attention case
+        if key is None:
+            key = query
+        if value is None:
+            value = query
+        
+        batch_size, seq_len_q, _ = query.shape
+        _, seq_len_k, _ = key.shape
+        
+        # Project Q, K, V
+        q = query.reshape((batch_size * seq_len_q, self.embed_dim))
+        k = key.reshape((batch_size * seq_len_k, self.embed_dim))
+        v = value.reshape((batch_size * seq_len_k, self.embed_dim))
+        
+        q = matmul(q, self.q_proj_weight)
+        k = matmul(k, self.k_proj_weight)
+        v = matmul(v, self.v_proj_weight)
+        
+        if self.q_proj_bias is not None:
+            q = q + broadcast_to(self.q_proj_bias, q.shape)
+            k = k + broadcast_to(self.k_proj_bias, k.shape)
+            v = v + broadcast_to(self.v_proj_bias, v.shape)
+        
+        # Reshape to (batch, seq_len, num_heads, dim_head) then transpose to (batch, num_heads, seq_len, dim_head)
+        q = q.reshape((batch_size, seq_len_q, self.num_heads, self.dim_head)).transpose((1, 2))
+        k = k.reshape((batch_size, seq_len_k, self.num_heads, self.dim_head)).transpose((1, 2))
+        v = v.reshape((batch_size, seq_len_k, self.num_heads, self.dim_head)).transpose((1, 2))
+        
+        # Call fused multihead attention (implements full algorithm in ops_fused.py)
+        attn_output = fused_multihead_attention(
+            q, k, v,
+            dim_head=self.dim_head,
+            dropout_prob=self.dropout_prob,
+            causal=self.causal,
+            training=self.training
+        )
+        
+        # Reshape back to (batch, seq_len, embed_dim)
+        attn_output = attn_output.transpose((1, 2)).reshape((batch_size * seq_len_q, self.embed_dim))
+        
+        # Output projection
+        output = matmul(attn_output, self.out_proj_weight)
+        if self.out_proj_bias is not None:
+            output = output + broadcast_to(self.out_proj_bias, output.shape)
+        
+        output = output.reshape((batch_size, seq_len_q, self.embed_dim))
+        
+        return output
 
 
 class BatchNormReLU(Module):
@@ -245,6 +400,7 @@ class BatchNormReLU(Module):
                                    device=device, dtype=dtype, requires_grad=False)
         self.running_var = Tensor(init.ones(dim, device=device, dtype=dtype), 
                                   device=device, dtype=dtype, requires_grad=False)
+        self.training = True
 
     def forward(self, x: Tensor) -> Tensor:
         """Perform fused BatchNorm + ReLU operation using fused op"""
@@ -305,6 +461,7 @@ class LinearBatchNormReLU(Module):
                                    device=device, dtype=dtype, requires_grad=False)
         self.running_var = Tensor(init.ones(out_features, device=device, dtype=dtype), 
                                   device=device, dtype=dtype, requires_grad=False)
+        self.training = True
 
     def forward(self, X: Tensor) -> Tensor:
         """Perform fused Linear + BatchNorm + ReLU operation using fused op"""
@@ -324,14 +481,16 @@ class LinearBatchNormReLU(Module):
                 linear_out = linear_out + broadcast_to(self.linear_bias, linear_out.shape)
             
             N = linear_out.shape[0]
-            mean = summation(linear_out, axes=0, keepdims=True) / N
+            #mean =summation(linear_out, axes=0, keepdims=True) / N
+            mean = linear_out.sum(axes=0) / N
             mean_broadcast = broadcast_to(mean, linear_out.shape)
-            var = summation((linear_out - mean_broadcast) ** 2, axes=0, keepdims=True) / N
+            var = ((linear_out - mean_broadcast) ** 2).sum(axes=0) / N 
+            #var = summation((linear_out - mean_broadcast) ** 2, axes=0, keepdims=True) / N
             
             # Update running stats
             self.running_mean = ((1 - self.momentum) * self.running_mean + 
-                               self.momentum * reshape(mean, self.out_features).detach())
+                               self.momentum * mean.detach())
             self.running_var = ((1 - self.momentum) * self.running_var + 
-                              self.momentum * reshape(var, self.out_features).detach())
+                              self.momentum * var.detach())
         
         return out
