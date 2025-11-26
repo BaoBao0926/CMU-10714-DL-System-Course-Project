@@ -17,7 +17,7 @@ from torch2needle.torch2needle_converter import torch2needle_fx
 from torch2needle.weight_converter import load_torch_weights_by_mapping
 from operator_fusion.operator_fusion import OperatorFusion
 
-from test_torch_model import ResNetConv18, NestedSequential
+from test_torch_model import ResNetConv18
 
 # 创建一个简单的 PyTorch 模型（Sequential，适合融合）
 class SimpleTorchModel(nn.Module):
