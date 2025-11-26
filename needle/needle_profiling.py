@@ -1,6 +1,6 @@
 import time
 import functools
-from collections import defaultdict
+import os
 
 # 全局注册表存储所有被装饰的函数
 _profiled_functions = {}
@@ -71,23 +71,48 @@ def get_performance_stats():
             }
     return stats
 
+# 模块级变量，用于跟踪当前运行中是否已经初始化过文件
+_performance_file_initialized = False
+
 def print_performance_summary():
-    """打印性能摘要，按总执行时间排序"""
+    """将性能摘要写入文件，每次运行清空，同次运行中追加"""
+    global _performance_file_initialized
+    
     stats = get_performance_stats()
     if not stats:
         print("No performance data available.")
         return
     
-    print("\n" + "="*80)
-    print("PERFORMANCE SUMMARY (sorted by total execution time)")
-    print("="*80)
+    # 决定写入模式：本次运行第一次调用清空，后续调用追加
+    mode = "w" if not _performance_file_initialized else "a"
     
-    sorted_stats = sorted(stats.items(), key=lambda x: x[1]['total_time_ms'], reverse=True)
+    with open("performance_summary.txt", mode, encoding="utf-8") as f:
+        if not _performance_file_initialized:
+            # 本次运行第一次调用，写入文件头
+            f.write("="*80 + "\n")
+            f.write("PERFORMANCE SUMMARY (sorted by total execution time)\n")
+            f.write("="*80 + "\n")
+            _performance_file_initialized = True
+        else:
+            # 本次运行后续调用，添加分隔符
+            f.write("\n" + "-"*80 + "\n")
+            f.write("ADDITIONAL PERFORMANCE DATA\n")
+            f.write("-"*80 + "\n")
+        
+        sorted_stats = sorted(stats.items(), key=lambda x: x[1]['total_time_ms'], reverse=True)
+        
+        for func_name, data in sorted_stats:
+            f.write(f"{func_name:.<40} calls: {data['calls']:6d} | "
+                   f"avg: {data['avg_time_ms']:8.3f}ms | "
+                   f"total: {data['total_time_ms']:10.3f}ms\n")
+        
+        f.write("="*80 + "\n")
     
-    for func_name, data in sorted_stats:
-        print(f"{func_name:.<30} calls: {data['calls']:6d} | "
-              f"avg: {data['avg_time_ms']:8.3f}ms | "
-              f"total: {data['total_time_ms']:10.3f}ms")
-    
-    print("="*80)
+    status = "written to" if mode == "w" else "appended to"
+    print(f"Performance summary has been {status} 'performance_summary.txt'")
+
+def reset_performance_tracking():
+    """重置性能跟踪状态，用于新的运行"""
+    global _performance_file_initialized
+    _performance_file_initialized = False
 

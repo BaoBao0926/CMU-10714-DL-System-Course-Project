@@ -76,6 +76,7 @@ class Module:
 
 
 class Identity(Module):
+    @profile_operation
     def forward(self, x: Tensor) -> Tensor:
         return x
 

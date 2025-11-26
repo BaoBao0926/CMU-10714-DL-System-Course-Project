@@ -22,8 +22,9 @@ from typing import Optional
 from ..autograd import Tensor
 from .ops_mathematic import matmul, broadcast_to, summation, reshape, relu, multiply, add, conv
 import numpy as np
+from needle.needle_profiling import profile_operation
 
-
+@profile_operation
 def fused_linear_relu(
     x: Tensor,
     weight: Tensor,
@@ -63,7 +64,7 @@ def fused_linear_relu(
         out = out + bias.broadcast_to(out.shape)
     return relu(out)
 
-
+@profile_operation
 def fused_batchnorm_relu(
     x: Tensor,
     weight: Tensor,
@@ -121,7 +122,7 @@ def fused_batchnorm_relu(
     # Future optimization: fuse the entire batchnorm + relu into a single kernel
     return relu(out)
 
-
+@profile_operation
 def fused_linear_batchnorm(
     x: Tensor,
     weight: Tensor,
@@ -189,7 +190,7 @@ def fused_linear_batchnorm(
     
     return result
 
-
+@profile_operation
 def fused_linear_batchnorm_relu(
     x: Tensor,
     weight: Tensor,
@@ -261,6 +262,7 @@ def fused_linear_batchnorm_relu(
 
 
 # mainly in ResNEt
+@profile_operation
 def fused_conv_batchnorm2d_relu(
     x: Tensor,
     weight: Tensor,
@@ -350,7 +352,7 @@ def fused_conv_batchnorm2d_relu(
     # Apply ReLU activation
     return relu(out_final)
 
-
+@profile_operation
 def fused_multihead_attention(
     q: Tensor,
     k: Tensor,
