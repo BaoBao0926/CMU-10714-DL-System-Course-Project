@@ -7,6 +7,12 @@ This is the repository of course prohect of CMU course: 10714 Deep Learning Syst
 git clone https://github.com/BaoBao0926/CMU-10714-DL-System-Course-Project.git
 ```
 
+You are free to build developer environment by both conda or uv, but you should make sure the environment is running on linux (either x86 Ubuntu systems or Windows WSL). 
+
+If you are a window system user, please make sure your computer has WSL. You can refer to the guideline at here: https://www.bilibili.com/video/BV1tW42197za/?spm_id_from=333.1007.top_right_bar_window_default_collection.content.click
+
+You are free to build the environment by conda or uv
+
 ```bash
 # config the environment
 conda create -n torch2needle python=3.10
