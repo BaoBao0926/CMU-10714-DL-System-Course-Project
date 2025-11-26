@@ -56,11 +56,11 @@ def fused_linear_relu(
     # ------------------------------------------------------------------
     
     # Linear transformation: out = x @ weight
-    out = matmul(x, weight)
+    out = x @ weight
     # Add bias if provided
     if bias is not None:
         # Ensure bias is broadcastable to output shape
-        out = out + broadcast_to(bias, out.shape)
+        out = out + bias.broadcast_to(out.shape)
     return relu(out)
 
 
@@ -102,28 +102,20 @@ def fused_batchnorm_relu(
     if training:
         # Training mode: compute batch statistics
         # Compute mean: E[x] over batch dimension
-        mean = summation(x, axes=0, keepdims=True) / N  # shape: (1, C)
-        mean_broadcast = broadcast_to(mean, x.shape)    # shape: (N, C)
-        
-        # Compute variance: E[(x - E[x])^2]
-        var = summation((x - mean_broadcast) ** 2, axes=0, keepdims=True) / N  # shape: (1, C)
-        std_broadcast = broadcast_to((var + eps) ** 0.5, x.shape)  # shape: (N, C)
-        
-        # Note: running_mean and running_var are updated by the caller (Module)
-        # to maintain proper gradient flow (detach is called externally)
-        
-        # Normalize: x_hat = (x - mean) / std
-        x_normalized = (x - mean_broadcast) / std_broadcast
+        mean = x.sum(axes=0)/ N  # shape: (1, C)
+        var = ((x - mean.broadcast_to(x.shape)) ** 2).sum(axes=0) / N
     else:
         # Eval mode: use running statistics
-        test_mean = broadcast_to(reshape(running_mean, (1, C)), x.shape)  # shape: (N, C)
-        test_std = broadcast_to(reshape((running_var + eps) ** 0.5, (1, C)), x.shape)  # shape: (N, C)
-        x_normalized = (x - test_mean) / test_std
-    
+        mean = running_mean
+        var = running_var
+    x_normalized = (x - mean.broadcast_to(x.shape)) / ((var.broadcast_to(x.shape) + eps) ** 0.5)
     # Apply affine transformation: y = gamma * x_hat + beta
-    weight_broadcast = broadcast_to(reshape(weight, (1, C)), x_normalized.shape)
-    bias_broadcast = broadcast_to(reshape(bias, (1, C)), x_normalized.shape)
+    weight_broadcast = weight.broadcast_to(x_normalized.shape)
+    bias_broadcast = bias.broadcast_to(x_normalized.shape)
     out = weight_broadcast * x_normalized + bias_broadcast
+    # weight_broadcast = broadcast_to(reshape(weight, (1, C)), x_normalized.shape)
+    # bias_broadcast = broadcast_to(reshape(bias, (1, C)), x_normalized.shape)
+    # out = weight_broadcast * x_normalized + bias_broadcast
     
     # Apply ReLU activation
     # Future optimization: fuse the entire batchnorm + relu into a single kernel
@@ -173,31 +165,26 @@ def fused_linear_batchnorm(
         The current implementation maintains training compatibility.
     """
     # Linear transformation
-    out = matmul(x, weight)
+    out = x @ weight
     if linear_bias is not None:
-        out = out + broadcast_to(linear_bias, out.shape)
+        out = out + linear_bias.broadcast_to(out.shape)
     
     # Batch normalization
     N, C = out.shape
     
     if training:
-        # Compute batch statistics
-        mean = summation(out, axes=0, keepdims=True) / N
-        mean_broadcast = broadcast_to(mean, out.shape)
-        var = summation((out - mean_broadcast) ** 2, axes=0, keepdims=True) / N
-        std_broadcast = broadcast_to((var + eps) ** 0.5, out.shape)
-        
-        # Normalize
-        out_normalized = (out - mean_broadcast) / std_broadcast
+        # Training mode: compute batch statistics
+        # Compute mean: E[x] over batch dimension
+        mean = out.sum(axes=0)/ N  # shape: (1, C)
+        var = ((out - mean.broadcast_to(out.shape)) ** 2).sum(axes=0) / N
     else:
-        # Use running statistics
-        test_mean = broadcast_to(reshape(running_mean, (1, C)), out.shape)
-        test_std = broadcast_to(reshape((running_var + eps) ** 0.5, (1, C)), out.shape)
-        out_normalized = (out - test_mean) / test_std
-    
+        # Eval mode: use running statistics
+        mean = running_mean
+        var = running_var
+    out_normalized = (out - mean.broadcast_to(out.shape)) / ((var.broadcast_to(out.shape) + eps) ** 0.5)
     # Apply affine parameters
-    weight_broadcast = broadcast_to(reshape(bn_weight, (1, C)), out_normalized.shape)
-    bias_broadcast = broadcast_to(reshape(bn_bias, (1, C)), out_normalized.shape)
+    weight_broadcast = bn_weight.broadcast_to(out_normalized.shape)
+    bias_broadcast = bn_bias.broadcast_to(out_normalized.shape)
     result = weight_broadcast * out_normalized + bias_broadcast
     
     return result
@@ -247,31 +234,26 @@ def fused_linear_batchnorm_relu(
         Future CUDA implementation can achieve 2-3x speedup over unfused version.
     """
     # Linear transformation
-    out = matmul(x, weight)
+    out = x @ weight
     if linear_bias is not None:
-        out = out + broadcast_to(linear_bias, out.shape)
+        out = out + linear_bias.broadcast_to(out.shape)
     
     # Batch normalization
     N, C = out.shape
     
     if training:
-        # Compute batch statistics
-        mean = summation(out, axes=0, keepdims=True) / N
-        mean_broadcast = broadcast_to(mean, out.shape)
-        var = summation((out - mean_broadcast) ** 2, axes=0, keepdims=True) / N
-        std_broadcast = broadcast_to((var + eps) ** 0.5, out.shape)
-        
-        # Normalize
-        out_normalized = (out - mean_broadcast) / std_broadcast
+        # Training mode: compute batch statistics
+        # Compute mean: E[x] over batch dimension
+        mean = out.sum(axes=0)/ N  # shape: (1, C)
+        var = ((out - mean.broadcast_to(out.shape)) ** 2).sum(axes=0) / N
     else:
-        # Use running statistics
-        test_mean = broadcast_to(reshape(running_mean, (1, C)), out.shape)
-        test_std = broadcast_to(reshape((running_var + eps) ** 0.5, (1, C)), out.shape)
-        out_normalized = (out - test_mean) / test_std
-    
+        # Eval mode: use running statistics
+        mean = running_mean
+        var = running_var
+    out_normalized = (out - mean.broadcast_to(out.shape)) / ((var.broadcast_to(out.shape) + eps) ** 0.5)
     # Apply affine parameters
-    weight_broadcast = broadcast_to(reshape(bn_weight, (1, C)), out_normalized.shape)
-    bias_broadcast = broadcast_to(reshape(bn_bias, (1, C)), out_normalized.shape)
+    weight_broadcast = bn_weight.broadcast_to(out_normalized.shape)
+    bias_broadcast = bn_bias.broadcast_to(out_normalized.shape)
     out = weight_broadcast * out_normalized + bias_broadcast
     
     # Apply ReLU activation
@@ -334,7 +316,7 @@ def fused_conv_batchnorm2d_relu(
     
     # Add conv bias if provided
     if conv_bias is not None:
-        bias_broadcast = broadcast_to(conv_bias, out.shape)
+        bias_broadcast = conv_bias.broadcast_to(out.shape)
         out = out + bias_broadcast
     
     # Convert back to NCHW for BatchNorm2d
@@ -349,23 +331,16 @@ def fused_conv_batchnorm2d_relu(
     if training:
         # Compute batch statistics across N*H*W dimension
         batch_size = N * H * W
-        mean = summation(out_reshaped, axes=0, keepdims=True) / batch_size  # shape: (1, C)
-        mean_broadcast = broadcast_to(mean, out_reshaped.shape)
-        
-        var = summation((out_reshaped - mean_broadcast) ** 2, axes=0, keepdims=True) / batch_size
-        std_broadcast = broadcast_to((var + eps) ** 0.5, out_reshaped.shape)
-        
-        # Normalize
-        out_normalized = (out_reshaped - mean_broadcast) / std_broadcast
+        mean = out_reshaped.sum(axes=0)/ batch_size  # shape: (1, C)
+        var = ((out_reshaped - mean.broadcast_to(out_reshaped.shape)) ** 2).sum(axes=0) / batch_size
     else:
         # Use running statistics
-        test_mean = broadcast_to(reshape(running_mean, (1, C)), out_reshaped.shape)
-        test_std = broadcast_to(reshape((running_var + eps) ** 0.5, (1, C)), out_reshaped.shape)
-        out_normalized = (out_reshaped - test_mean) / test_std
-    
+        mean = running_mean
+        var = running_var
+    out_normalized = (out_reshaped - mean.broadcast_to(out_reshaped.shape)) / ((var.broadcast_to(out_reshaped.shape) + eps) ** 0.5)
     # Apply affine transformation
-    weight_broadcast = broadcast_to(reshape(bn_weight, (1, C)), out_normalized.shape)
-    bias_broadcast = broadcast_to(reshape(bn_bias, (1, C)), out_normalized.shape)
+    weight_broadcast = bn_weight.broadcast_to(out_normalized.shape)
+    bias_broadcast = bn_bias.broadcast_to(out_normalized.shape)
     out_bn = weight_broadcast * out_normalized + bias_broadcast
     
     # Reshape back to NCHW

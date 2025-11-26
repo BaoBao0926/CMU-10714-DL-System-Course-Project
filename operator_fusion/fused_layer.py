@@ -89,6 +89,7 @@ class LinearBatchNorm(Module):
                                    device=device, dtype=dtype, requires_grad=False)
         self.running_var = Tensor(init.ones(out_features, device=device, dtype=dtype), 
                                   device=device, dtype=dtype, requires_grad=False)
+        self.training = True
 
     def forward(self, X: Tensor) -> Tensor:
         """Perform fused Linear + BatchNorm operation using fused op"""
@@ -181,6 +182,7 @@ class ConvBatchNorm2dReLU(Module):
                                    device=device, dtype=dtype, requires_grad=False)
         self.running_var = Tensor(init.ones(out_channels, device=device, dtype=dtype),
                                   device=device, dtype=dtype, requires_grad=False)
+        self.training = True
 
     def forward(self, x: Tensor) -> Tensor:
         """Perform fused Conv2d + BatchNorm2d + ReLU operation using fused op"""
@@ -210,15 +212,15 @@ class ConvBatchNorm2dReLU(Module):
             
             # Compute mean and variance
             batch_size = N * H * W
-            mean = summation(conv_out_reshaped, axes=0, keepdims=True) / batch_size
+            mean = conv_out_reshaped.sum(axes=0) / batch_size
             mean_broadcast = broadcast_to(mean, conv_out_reshaped.shape)
-            var = summation((conv_out_reshaped - mean_broadcast) ** 2, axes=0, keepdims=True) / batch_size
+            var = ((conv_out_reshaped - mean_broadcast) ** 2).sum(axes=0) / batch_size
             
             # Update running stats
             self.running_mean = ((1 - self.momentum) * self.running_mean +
-                               self.momentum * reshape(mean, self.out_channels).detach())
+                               self.momentum * mean.detach())
             self.running_var = ((1 - self.momentum) * self.running_var +
-                              self.momentum * reshape(var, self.out_channels).detach())
+                              self.momentum * var.detach())
         
         return out
 
@@ -306,6 +308,7 @@ class FusedMultiHeadAttention(Module):
             )
         else:
             self.out_proj_bias = None
+        self.training = True
     
     def forward(
         self,
@@ -397,6 +400,7 @@ class BatchNormReLU(Module):
                                    device=device, dtype=dtype, requires_grad=False)
         self.running_var = Tensor(init.ones(dim, device=device, dtype=dtype), 
                                   device=device, dtype=dtype, requires_grad=False)
+        self.training = True
 
     def forward(self, x: Tensor) -> Tensor:
         """Perform fused BatchNorm + ReLU operation using fused op"""
@@ -457,6 +461,7 @@ class LinearBatchNormReLU(Module):
                                    device=device, dtype=dtype, requires_grad=False)
         self.running_var = Tensor(init.ones(out_features, device=device, dtype=dtype), 
                                   device=device, dtype=dtype, requires_grad=False)
+        self.training = True
 
     def forward(self, X: Tensor) -> Tensor:
         """Perform fused Linear + BatchNorm + ReLU operation using fused op"""
@@ -476,14 +481,16 @@ class LinearBatchNormReLU(Module):
                 linear_out = linear_out + broadcast_to(self.linear_bias, linear_out.shape)
             
             N = linear_out.shape[0]
-            mean = summation(linear_out, axes=0, keepdims=True) / N
+            #mean =summation(linear_out, axes=0, keepdims=True) / N
+            mean = linear_out.sum(axes=0) / N
             mean_broadcast = broadcast_to(mean, linear_out.shape)
-            var = summation((linear_out - mean_broadcast) ** 2, axes=0, keepdims=True) / N
+            var = ((linear_out - mean_broadcast) ** 2).sum(axes=0) / N 
+            #var = summation((linear_out - mean_broadcast) ** 2, axes=0, keepdims=True) / N
             
             # Update running stats
             self.running_mean = ((1 - self.momentum) * self.running_mean + 
-                               self.momentum * reshape(mean, self.out_features).detach())
+                               self.momentum * mean.detach())
             self.running_var = ((1 - self.momentum) * self.running_var + 
-                              self.momentum * reshape(var, self.out_features).detach())
+                              self.momentum * var.detach())
         
         return out
