@@ -1,4 +1,6 @@
 #include <hip/hip_runtime.h>
+#include <miopen/miopen.h>
+#include <miopen/fusion.h>
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -730,6 +732,255 @@ void ReduceSum(const HipArray& a, HipArray* out, size_t reduce_size) {
   /// END SOLUTION
 }
 
+
+////////////////////////////////////////////////////////////////////////////////
+// new backend operators
+////////////////////////////////////////////////////////////////////////////////
+void Conv(const HipArray& a, const HipArray& b, HipArray* out,
+          uint32_t batch, uint32_t in_channels, uint32_t in_height, uint32_t in_width,
+          uint32_t out_channels, uint32_t kernel_h, uint32_t kernel_w,
+          uint32_t stride, uint32_t padding) {
+    /**
+     * Perform 2D convolution using MIOpen library.
+     * 
+     * Args:
+     *   a: input array of shape (batch, in_channels, in_height, in_width)
+     *   b: kernel array of shape (out_channels, in_channels, kernel_h, kernel_w)
+     *   out: output array
+     *   batch: batch size
+     *   in_channels: number of input channels
+     *   in_height: input height
+     *   in_width: input width
+     *   out_channels: number of output channels (filters)
+     *   kernel_h: kernel height
+     *   kernel_w: kernel width
+     *   stride: stride for convolution
+     *   padding: padding for convolution
+     */
+    
+    miopenHandle_t handle;
+    miopenStatus_t status = miopenCreate(&handle);
+    if (status != miopenStatusSuccess) {
+      throw std::runtime_error("Failed to create MIOpen handle");
+    }
+    
+    // Create tensor descriptors
+    miopenTensorDescriptor_t input_desc, output_desc, kernel_desc;
+    miopenCreateTensorDescriptor(&input_desc);
+    miopenCreateTensorDescriptor(&output_desc);
+    miopenCreateTensorDescriptor(&kernel_desc);
+    
+    // Create convolution descriptor
+    miopenConvolutionDescriptor_t conv_desc;
+    miopenCreateConvolutionDescriptor(&conv_desc);
+    
+    // Set input tensor descriptor (NCHW format)
+    miopenSet4dTensorDescriptor(input_desc, miopenFloat, batch, in_channels, in_height, in_width);
+    
+    // Set kernel tensor descriptor (NCHW format)
+    miopenSet4dTensorDescriptor(kernel_desc, miopenFloat, out_channels, in_channels, kernel_h, kernel_w);
+    
+    // Initialize convolution descriptor
+    miopenInitConvolutionDescriptor(conv_desc, miopenConvolution, padding, padding, stride, stride, 1, 1);
+    
+    // Get output dimensions
+    int out_n, out_c, out_h, out_w;
+    miopenGetConvolutionForwardOutputDim(conv_desc, input_desc, kernel_desc, &out_n, &out_c, &out_h, &out_w);
+    
+    // Set output tensor descriptor
+    miopenSet4dTensorDescriptor(output_desc, miopenFloat, out_n, out_c, out_h, out_w);
+    
+    // Find the best convolution algorithm
+    size_t workspace_size = 0;
+    miopenConvolutionForwardGetWorkSpaceSize(handle, kernel_desc, input_desc, conv_desc, output_desc, &workspace_size);
+    
+    // Allocate workspace
+    void* workspace = nullptr;
+    if (workspace_size > 0) {
+      hipMalloc(&workspace, workspace_size);
+    }
+    
+    // // Get algorithm
+    // miopenConvFwdAlgorithm_t algo = miopenConvolutionFwdAlgoGEMM;
+
+    miopenConvAlgoPerf_t perf_results;
+    int returned_algo_count = 0;
+    miopenFindConvolutionForwardAlgorithm(
+        handle, input_desc, a.ptr, kernel_desc, b.ptr,
+        conv_desc, output_desc, out->ptr, 
+        1, &returned_algo_count, &perf_results, 
+        workspace, workspace_size, false);
+        
+    miopenConvFwdAlgorithm_t algo = perf_results.fwd_algo;
+    
+    // Perform convolution
+    float alpha = 1.0f, beta = 0.0f;
+    miopenConvolutionForward(handle, &alpha, input_desc, a.ptr, kernel_desc, b.ptr,
+                            conv_desc, algo, &beta, output_desc, out->ptr,
+                            workspace, workspace_size);
+    
+    // Cleanup
+    if (workspace) hipFree(workspace);
+    miopenDestroyTensorDescriptor(input_desc);
+    miopenDestroyTensorDescriptor(output_desc);
+    miopenDestroyTensorDescriptor(kernel_desc);
+    miopenDestroyConvolutionDescriptor(conv_desc);
+    miopenDestroy(handle);
+  }
+
+void BatchNorm2D(const HipArray& input, HipArray* output,
+                 const HipArray& scale, const HipArray& bias,
+                 HipArray& running_mean, HipArray& running_var,
+                 uint32_t batch, uint32_t channels, uint32_t height, uint32_t width,
+                 float eps = 1e-5f) {
+    /**
+     * Perform 2D Batch Normalization using MIOpen library.
+     * TODO: Currently this batchnorm2d implementation is inference-only, add train feature if needed
+     * Args:
+     *   input: input array of shape (batch, channels, height, width)
+     *   output: output array
+     *   scale: scale parameters (gamma) of shape (channels,)
+     *   bias: bias parameters (beta) of shape (channels,)
+     *   running_mean: running mean of shape (channels,)
+     *   running_var: running variance of shape (channels,)
+     *   batch: batch size
+     *   channels: number of channels
+     *   height: input height
+     *   width: input width
+     *   momentum: momentum for running statistics update
+     *   eps: epsilon for numerical stability
+     */
+    
+    miopenHandle_t handle;
+    miopenStatus_t status = miopenCreate(&handle);
+    if (status != miopenStatusSuccess) {
+      throw std::runtime_error("Failed to create MIOpen handle");
+    }
+
+    // Create tensor descriptors
+    miopenTensorDescriptor_t input_desc, output_desc, bn_desc;
+    miopenCreateTensorDescriptor(&input_desc);
+    miopenCreateTensorDescriptor(&output_desc);
+    miopenCreateTensorDescriptor(&bn_desc);
+
+    // Set input/output tensor descriptors (NCHW format)
+    miopenSet4dTensorDescriptor(input_desc, miopenFloat, batch, channels, height, width);
+    miopenSet4dTensorDescriptor(output_desc, miopenFloat, batch, channels, height, width);
+    
+    // Set batch norm descriptor for per-activation mode (spatial BN)
+    miopenSet4dTensorDescriptor(bn_desc, miopenFloat, 1, channels, 1, 1);
+
+    // Choose batch normalization mode
+    miopenBatchNormMode_t bn_mode = miopenBNSpatial;  // Spatial Batch Normalization
+    
+    float alpha = 1.0f, beta = 0.0f;
+
+    // Inference mode: use running statistics
+    miopenBatchNormalizationForwardInference(
+        handle, bn_mode, &alpha, &beta,
+        input_desc, input.ptr,     // input
+        output_desc, output->ptr,  // output
+        bn_desc, scale.ptr, bias.ptr,           // scale (gamma), bias (beta)
+        running_mean.ptr, running_var.ptr,      // running mean & variance
+        eps                        // epsilon
+    );
+
+    // Cleanup
+    miopenDestroyTensorDescriptor(input_desc);
+    miopenDestroyTensorDescriptor(output_desc);
+    miopenDestroyTensorDescriptor(bn_desc);
+    miopenDestroy(handle);
+  }
+
+void ConvBNReluFused(const HipArray& input, HipArray* output,
+                     const HipArray& weight, const HipArray& bias,
+                     const HipArray& scale, const HipArray& shift,
+                     const HipArray& running_mean, const HipArray& running_var,
+                     uint32_t batch, uint32_t in_channels, uint32_t in_height, uint32_t in_width,
+                     uint32_t out_channels, uint32_t kernel_h, uint32_t kernel_w,
+                     uint32_t stride, uint32_t padding, float eps = 1e-5f) {
+  
+  miopenHandle_t handle;
+  miopenCreate(&handle);
+  
+  // create fusion plan for MIOpen
+  miopenFusionPlanDescriptor_t fusePlanDesc;
+  miopenTensorDescriptor_t input_desc;
+  miopenCreateTensorDescriptor(&input_desc);
+  miopenSet4dTensorDescriptor(input_desc, miopenFloat, batch, in_channels, in_height, in_width);
+  fusePlanDesc = miopenCreateFusionPlan(miopenVerticalFusion, input_desc);
+  
+  // define fusion op descriptor
+  miopenFusionOpDescriptor_t convOp;
+  miopenFusionOpDescriptor_t bnOp;
+  miopenFusionOpDescriptor_t activOp;
+  
+  miopenStatus_t status;
+  
+  // add conv to fusion plan
+  miopenConvolutionDescriptor_t conv_desc;
+  miopenCreateConvolutionDescriptor(&conv_desc);
+  miopenInitConvolutionDescriptor(conv_desc, miopenConvolution, padding, padding, stride, stride, 1, 1);
+  
+  miopenTensorDescriptor_t weight_desc;
+  miopenCreateTensorDescriptor(&weight_desc);
+  miopenSet4dTensorDescriptor(weight_desc, miopenFloat, out_channels, in_channels, kernel_h, kernel_w);
+  
+  status = miopenCreateOpConvForward(fusePlanDesc, &convOp, conv_desc, weight_desc);
+  if (status != miopenStatusSuccess) {
+    throw std::runtime_error("Fail to create convolution operator in fusion plan");
+  }
+  
+  // add batchnorm to fusion plan
+  miopenTensorDescriptor_t bn_desc;
+  miopenCreateTensorDescriptor(&bn_desc);
+  miopenSet4dTensorDescriptor(bn_desc, miopenFloat, 1, out_channels, 1, 1);
+  
+  status = miopenCreateOpBatchNormInference(fusePlanDesc, &bnOp, bn_desc);
+  if (status != miopenStatusSuccess) {
+    throw std::runtime_error("Fail to create batchnorm operator in fusion plan")
+  }
+  
+  // add relu to fusion plan
+  status = miopenCreateOpActivationForward(fusePlanDesc, &activOp, miopenActivationRELU);
+  if (status != miopenStatusSuccess) {
+    throw std::runtime_error("Fail to create relu operator in fusion plan")
+  }
+  
+  // compile fusion plan
+  status = miopenCompileFusionPlan(handle, fusePlanDesc);
+  if (status != miopenStatusSuccess) {
+    throw std::runtime_error("Fail to compile fusion plan")
+  }
+  
+  // set alpha and beta for convolution
+  float alpha = 1.0f, beta = 0.0f;
+  // set conv param
+  status = miopenSetOpArgsConvForward(convOp, &alpha, &beta, weight.ptr, bias.ptr);
+  // set batchnorm2d param
+  status = miopenSetOpArgsBatchNormInference(bnOp, &alpha, &beta, scale.ptr, shift.ptr, 
+                                           running_mean.ptr, running_var.ptr, eps);
+  // set relu param
+  miopenActivationDescriptor_t activ_desc;
+  miopenCreateActivationDescriptor(&activ_desc);
+  miopenSetActivationDescriptor(activ_desc, miopenActivationRELU, 0.0, 0.0, 1.0);
+  status = miopenSetOpArgsActivationForward(activOp, &alpha, &beta, activ_desc);
+  
+  // perform fusion
+  status = miopenExecuteFusionPlan(handle, fusePlanDesc, input_desc, input.ptr, 
+                                 input_desc, output->ptr, nullptr);
+  
+  // clear resource
+  miopenDestroyFusionPlan(fusePlanDesc);
+  miopenDestroyTensorDescriptor(input_desc);
+  miopenDestroyTensorDescriptor(weight_desc);
+  miopenDestroyTensorDescriptor(bn_desc);
+  miopenDestroyConvolutionDescriptor(conv_desc);
+  miopenDestroyActivationDescriptor(activ_desc);
+  miopenDestroy(handle);
+}
+
+
 }  // namespace hip
 }  // namespace needle
 
@@ -799,4 +1050,7 @@ PYBIND11_MODULE(ndarray_backend_hip, m) {
 
   m.def("reduce_max", ReduceMax);
   m.def("reduce_sum", ReduceSum);
+  m.def("conv",Conv);
+  m.def("batchnorm2d",BatchNorm2D);
+  m.def("convbn2drelu",ConvBNReluFused);
 }
