@@ -73,6 +73,9 @@ def load_torch_weights_by_mapping(layer_mapping, verbose=True, device=ndl.cpu(),
                 torch_weight = torch_layer.weight.detach().cpu().numpy().astype(np.float32)
                 # 转置: (out_ch, in_ch, kh, kw) -> (kh, kw, in_ch, out_ch)
                 needle_weight = np.transpose(torch_weight, (2, 3, 1, 0))
+                needle_weight = np.ascontiguousarray(needle_weight)
+                # needle_weight = ndl.Tensor(needle_weight, device=device, dtype=dtype)
+                # needle_weight = needle_weight.transpose((2,3,1,0)).compact()
                 needle_layer.weight = ndl.Tensor(needle_weight, device=device, dtype=dtype)
                 
                 if torch_layer.bias is not None:

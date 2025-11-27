@@ -735,5 +735,3 @@ class AdaptiveAvgPool2d(TensorOp):
 
 def adaptive_avg_pool2d(x,output_size=(1,1)):
     return AdaptiveAvgPool2d(output_size=output_size)(x)
-
-

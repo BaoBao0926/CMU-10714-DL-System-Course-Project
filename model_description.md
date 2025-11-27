@@ -10,7 +10,7 @@ model = ViT('B_16_imagenet1k', pretrained=True)
 ```
 
 ## 2.ResNet18 for Image Classification
-[ResNet](https://docs.pytorch.org/vision/main/models/resnet.html)
+[ResNet]( )
 
 ```bash
 import torch
