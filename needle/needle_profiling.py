@@ -4,6 +4,8 @@ import os
 
 # 全局注册表存储所有被装饰的函数
 _profiled_functions = {}
+# 模块级变量，用于跟踪当前运行中是否已经初始化过文件
+_performance_file_initialized = False
 
 def profile_operation(func):
     """装饰器用于测量函数的执行时间和调用次数"""
@@ -71,9 +73,6 @@ def get_performance_stats():
             }
     return stats
 
-# 模块级变量，用于跟踪当前运行中是否已经初始化过文件
-_performance_file_initialized = False
-
 def print_performance_summary():
     """将性能摘要写入文件，每次运行清空，同次运行中追加"""
     global _performance_file_initialized
@@ -84,7 +83,7 @@ def print_performance_summary():
         return
     
     # 决定写入模式：本次运行第一次调用清空，后续调用追加
-    mode = "w" if not _performance_file_initialized else "a"
+    mode = "w" if _performance_file_initialized else "a"
     
     with open("performance_summary.txt", mode, encoding="utf-8") as f:
         if not _performance_file_initialized:
@@ -111,8 +110,15 @@ def print_performance_summary():
     status = "written to" if mode == "w" else "appended to"
     print(f"Performance summary has been {status} 'performance_summary.txt'")
 
-def reset_performance_tracking():
+def reset_performance_tracking(performance_file_initialized=True, hard=False):
     """重置性能跟踪状态，用于新的运行"""
     global _performance_file_initialized
-    _performance_file_initialized = False
+    _performance_file_initialized = performance_file_initialized
+    if hard:
+        # 完全清零所有计数（回到程序启动状态）
+        for wrapper in _profiled_functions.values():
+            wrapper.call_count = 0
+            wrapper.total_time = 0.0
+            wrapper._baseline_calls = 0
+            wrapper._baseline_total = 0.0
 

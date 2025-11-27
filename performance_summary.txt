@@ -1,18 +1,21 @@
-================================================================================
-PERFORMANCE SUMMARY (sorted by total execution time)
-================================================================================
-BatchNorm1d.forward..................... calls:    220 | avg:    0.071ms | total:     15.511ms
-Linear.forward.......................... calls:    660 | avg:    0.023ms | total:     15.368ms
-ReLU.forward............................ calls:    440 | avg:    0.005ms | total:      2.276ms
-================================================================================
 
 --------------------------------------------------------------------------------
 ADDITIONAL PERFORMANCE DATA
 --------------------------------------------------------------------------------
-Tensor.fused_linear_batchnorm_relu...... calls:    220 | avg:    0.099ms | total:     21.803ms
-Linear.forward.......................... calls:    880 | avg:    0.023ms | total:     20.066ms
-BatchNorm1d.forward..................... calls:    220 | avg:    0.071ms | total:     15.511ms
-Tensor.fused_linear_relu................ calls:    220 | avg:    0.031ms | total:      6.767ms
-ReLU.forward............................ calls:    440 | avg:    0.005ms | total:      2.276ms
-Identity.forward........................ calls:    660 | avg:    0.000ms | total:      0.173ms
+Conv.forward............................ calls:   2200 | avg:   25.482ms | total:  56059.502ms
+BatchNorm2d.forward..................... calls:   2200 | avg:    2.412ms | total:   5306.172ms
+ReLU.forward............................ calls:   1870 | avg:    0.442ms | total:    826.921ms
+Linear.forward.......................... calls:    110 | avg:    0.093ms | total:     10.234ms
+Flatten.forward......................... calls:    110 | avg:    0.009ms | total:      0.951ms
+================================================================================
+================================================================================
+PERFORMANCE SUMMARY (sorted by total execution time)
+================================================================================
+Tensor.fused_conv_batchnorm2d_relu...... calls:    990 | avg:   31.118ms | total:  30806.607ms
+Conv.forward............................ calls:   1210 | avg:   23.901ms | total:  28920.465ms
+BatchNorm2d.forward..................... calls:   1210 | avg:    1.677ms | total:   2028.915ms
+ReLU.forward............................ calls:    880 | avg:    0.019ms | total:     17.091ms
+Linear.forward.......................... calls:    110 | avg:    0.150ms | total:     16.524ms
+Flatten.forward......................... calls:    110 | avg:    0.008ms | total:      0.915ms
+Identity.forward........................ calls:   1980 | avg:    0.000ms | total:      0.768ms
 ================================================================================
