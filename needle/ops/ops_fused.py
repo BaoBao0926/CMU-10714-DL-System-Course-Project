@@ -20,7 +20,7 @@ These functions are designed to:
 
 from typing import Optional
 from ..autograd import Tensor
-from .ops_mathematic import matmul, broadcast_to, summation, reshape, relu, multiply, add
+from .ops_mathematic import matmul, broadcast_to, summation, reshape, relu, multiply, add, conv
 import numpy as np
 
 
@@ -56,11 +56,11 @@ def fused_linear_relu(
     # ------------------------------------------------------------------
     
     # Linear transformation: out = x @ weight
-    out = matmul(x, weight)
+    out = x @ weight
     # Add bias if provided
     if bias is not None:
         # Ensure bias is broadcastable to output shape
-        out = out + broadcast_to(bias, out.shape)
+        out = out + bias.broadcast_to(out.shape)
     return relu(out)
 
 
@@ -102,28 +102,20 @@ def fused_batchnorm_relu(
     if training:
         # Training mode: compute batch statistics
         # Compute mean: E[x] over batch dimension
-        mean = summation(x, axes=0, keepdims=True) / N  # shape: (1, C)
-        mean_broadcast = broadcast_to(mean, x.shape)    # shape: (N, C)
-        
-        # Compute variance: E[(x - E[x])^2]
-        var = summation((x - mean_broadcast) ** 2, axes=0, keepdims=True) / N  # shape: (1, C)
-        std_broadcast = broadcast_to((var + eps) ** 0.5, x.shape)  # shape: (N, C)
-        
-        # Note: running_mean and running_var are updated by the caller (Module)
-        # to maintain proper gradient flow (detach is called externally)
-        
-        # Normalize: x_hat = (x - mean) / std
-        x_normalized = (x - mean_broadcast) / std_broadcast
+        mean = x.sum(axes=0)/ N  # shape: (1, C)
+        var = ((x - mean.broadcast_to(x.shape)) ** 2).sum(axes=0) / N
     else:
         # Eval mode: use running statistics
-        test_mean = broadcast_to(reshape(running_mean, (1, C)), x.shape)  # shape: (N, C)
-        test_std = broadcast_to(reshape((running_var + eps) ** 0.5, (1, C)), x.shape)  # shape: (N, C)
-        x_normalized = (x - test_mean) / test_std
-    
+        mean = running_mean
+        var = running_var
+    x_normalized = (x - mean.broadcast_to(x.shape)) / ((var.broadcast_to(x.shape) + eps) ** 0.5)
     # Apply affine transformation: y = gamma * x_hat + beta
-    weight_broadcast = broadcast_to(reshape(weight, (1, C)), x_normalized.shape)
-    bias_broadcast = broadcast_to(reshape(bias, (1, C)), x_normalized.shape)
+    weight_broadcast = weight.broadcast_to(x_normalized.shape)
+    bias_broadcast = bias.broadcast_to(x_normalized.shape)
     out = weight_broadcast * x_normalized + bias_broadcast
+    # weight_broadcast = broadcast_to(reshape(weight, (1, C)), x_normalized.shape)
+    # bias_broadcast = broadcast_to(reshape(bias, (1, C)), x_normalized.shape)
+    # out = weight_broadcast * x_normalized + bias_broadcast
     
     # Apply ReLU activation
     # Future optimization: fuse the entire batchnorm + relu into a single kernel
@@ -173,31 +165,26 @@ def fused_linear_batchnorm(
         The current implementation maintains training compatibility.
     """
     # Linear transformation
-    out = matmul(x, weight)
+    out = x @ weight
     if linear_bias is not None:
-        out = out + broadcast_to(linear_bias, out.shape)
+        out = out + linear_bias.broadcast_to(out.shape)
     
     # Batch normalization
     N, C = out.shape
     
     if training:
-        # Compute batch statistics
-        mean = summation(out, axes=0, keepdims=True) / N
-        mean_broadcast = broadcast_to(mean, out.shape)
-        var = summation((out - mean_broadcast) ** 2, axes=0, keepdims=True) / N
-        std_broadcast = broadcast_to((var + eps) ** 0.5, out.shape)
-        
-        # Normalize
-        out_normalized = (out - mean_broadcast) / std_broadcast
+        # Training mode: compute batch statistics
+        # Compute mean: E[x] over batch dimension
+        mean = out.sum(axes=0)/ N  # shape: (1, C)
+        var = ((out - mean.broadcast_to(out.shape)) ** 2).sum(axes=0) / N
     else:
-        # Use running statistics
-        test_mean = broadcast_to(reshape(running_mean, (1, C)), out.shape)
-        test_std = broadcast_to(reshape((running_var + eps) ** 0.5, (1, C)), out.shape)
-        out_normalized = (out - test_mean) / test_std
-    
+        # Eval mode: use running statistics
+        mean = running_mean
+        var = running_var
+    out_normalized = (out - mean.broadcast_to(out.shape)) / ((var.broadcast_to(out.shape) + eps) ** 0.5)
     # Apply affine parameters
-    weight_broadcast = broadcast_to(reshape(bn_weight, (1, C)), out_normalized.shape)
-    bias_broadcast = broadcast_to(reshape(bn_bias, (1, C)), out_normalized.shape)
+    weight_broadcast = bn_weight.broadcast_to(out_normalized.shape)
+    bias_broadcast = bn_bias.broadcast_to(out_normalized.shape)
     result = weight_broadcast * out_normalized + bias_broadcast
     
     return result
@@ -247,35 +234,241 @@ def fused_linear_batchnorm_relu(
         Future CUDA implementation can achieve 2-3x speedup over unfused version.
     """
     # Linear transformation
-    out = matmul(x, weight)
+    out = x @ weight
     if linear_bias is not None:
-        out = out + broadcast_to(linear_bias, out.shape)
+        out = out + linear_bias.broadcast_to(out.shape)
     
     # Batch normalization
     N, C = out.shape
     
     if training:
-        # Compute batch statistics
-        mean = summation(out, axes=0, keepdims=True) / N
-        mean_broadcast = broadcast_to(mean, out.shape)
-        var = summation((out - mean_broadcast) ** 2, axes=0, keepdims=True) / N
-        std_broadcast = broadcast_to((var + eps) ** 0.5, out.shape)
-        
-        # Normalize
-        out_normalized = (out - mean_broadcast) / std_broadcast
+        # Training mode: compute batch statistics
+        # Compute mean: E[x] over batch dimension
+        mean = out.sum(axes=0)/ N  # shape: (1, C)
+        var = ((out - mean.broadcast_to(out.shape)) ** 2).sum(axes=0) / N
     else:
-        # Use running statistics
-        test_mean = broadcast_to(reshape(running_mean, (1, C)), out.shape)
-        test_std = broadcast_to(reshape((running_var + eps) ** 0.5, (1, C)), out.shape)
-        out_normalized = (out - test_mean) / test_std
-    
+        # Eval mode: use running statistics
+        mean = running_mean
+        var = running_var
+    out_normalized = (out - mean.broadcast_to(out.shape)) / ((var.broadcast_to(out.shape) + eps) ** 0.5)
     # Apply affine parameters
-    weight_broadcast = broadcast_to(reshape(bn_weight, (1, C)), out_normalized.shape)
-    bias_broadcast = broadcast_to(reshape(bn_bias, (1, C)), out_normalized.shape)
+    weight_broadcast = bn_weight.broadcast_to(out_normalized.shape)
+    bias_broadcast = bn_bias.broadcast_to(out_normalized.shape)
     out = weight_broadcast * out_normalized + bias_broadcast
     
     # Apply ReLU activation
     return relu(out)
+
+
+# mainly in ResNEt
+def fused_conv_batchnorm2d_relu(
+    x: Tensor,
+    weight: Tensor,
+    conv_bias: Optional[Tensor],
+    bn_weight: Tensor,
+    bn_bias: Tensor,
+    running_mean: Tensor,
+    running_var: Tensor,
+    stride: int = 1,
+    padding: int = 1,
+    eps: float = 1e-5,
+    momentum: float = 0.1,
+    training: bool = True,
+) -> Tensor:
+    """
+    Fused Conv2d + BatchNorm2d + ReLU activation.
+    
+    Computes: ReLU(BatchNorm2d(Conv2d(x)))
+    
+    This is the most common building block in modern CNNs like ResNet, MobileNet, EfficientNet.
+    Fusion provides significant benefits:
+    1. Eliminates two intermediate feature map allocations (saves 2x memory bandwidth)
+    2. Better cache/shared memory utilization in GPU
+    3. Enables kernel fusion for 2-3x speedup in practice
+    4. Critical for efficient inference on edge devices
+    
+    Args:
+        x: Input tensor in NCHW format, shape (batch_size, in_channels, height, width)
+        weight: Conv weight of shape (kernel_size, kernel_size, in_channels, out_channels)
+        conv_bias: Optional conv bias of shape (out_channels,)
+        bn_weight: BatchNorm scale (gamma) of shape (out_channels,)
+        bn_bias: BatchNorm shift (beta) of shape (out_channels,)
+        running_mean: Running mean of shape (out_channels,)
+        running_var: Running variance of shape (out_channels,)
+        stride: Convolution stride
+        padding: Convolution padding
+        eps: Small constant for numerical stability in BatchNorm
+        momentum: Momentum for running statistics update
+        training: Training vs eval mode
+    
+    Returns:
+        Output tensor in NCHW format with ReLU applied
+    
+    Note:
+        Input/output are in NCHW format for consistency with Conv module.
+        Internally converts to NHWC for conv operation, then back to NCHW.
+    """
+    # Convert from NCHW to NHWC for conv operation
+    x_nhwc = x.transpose((0, 2, 3, 1))  # N,C,H,W -> N,H,W,C
+    
+    # Convolution
+    out = conv(x_nhwc, weight, stride=stride, padding=padding)
+    
+    # Add conv bias if provided
+    if conv_bias is not None:
+        bias_broadcast = conv_bias.broadcast_to(out.shape)
+        out = out + bias_broadcast
+    
+    # Convert back to NCHW for BatchNorm2d
+    out_nchw = out.transpose((0, 3, 1, 2))  # N,H,W,C -> N,C,H,W
+    
+    # BatchNorm2d: process as (N*H*W, C)
+    N, C, H, W = out_nchw.shape
+    
+    # Reshape to (N*H*W, C) for batch norm computation
+    out_reshaped = out_nchw.transpose((1, 2)).transpose((2, 3)).reshape((N * H * W, C))
+    
+    if training:
+        # Compute batch statistics across N*H*W dimension
+        batch_size = N * H * W
+        mean = out_reshaped.sum(axes=0)/ batch_size  # shape: (1, C)
+        var = ((out_reshaped - mean.broadcast_to(out_reshaped.shape)) ** 2).sum(axes=0) / batch_size
+    else:
+        # Use running statistics
+        mean = running_mean
+        var = running_var
+    out_normalized = (out_reshaped - mean.broadcast_to(out_reshaped.shape)) / ((var.broadcast_to(out_reshaped.shape) + eps) ** 0.5)
+    # Apply affine transformation
+    weight_broadcast = bn_weight.broadcast_to(out_normalized.shape)
+    bias_broadcast = bn_bias.broadcast_to(out_normalized.shape)
+    out_bn = weight_broadcast * out_normalized + bias_broadcast
+    
+    # Reshape back to NCHW
+    out_bn_reshaped = out_bn.reshape((N, H, W, C))
+    out_final = out_bn_reshaped.transpose((2, 3)).transpose((1, 2))  # N,H,W,C -> N,C,H,W
+    
+    # Apply ReLU activation
+    return relu(out_final)
+
+
+def fused_multihead_attention(
+    q: Tensor,
+    k: Tensor,
+    v: Tensor,
+    dim_head: int,
+    dropout_prob: float = 0.0,
+    causal: bool = False,
+    training: bool = True,
+) -> Tensor:
+    """
+    Fused Multi-Head Attention inspired by FlashAttention.
+    
+    Computes: softmax(Q @ K^T / sqrt(d)) @ V with optional causal masking
+    
+    This fused implementation combines multiple attention operations:
+    1. Q @ K^T (attention scores computation)
+    2. Scaling by sqrt(d)
+    3. Optional causal masking
+    4. Softmax normalization
+    5. Optional dropout
+    6. Attention @ V (context aggregation)
+    
+    Benefits of fusion:
+    - Reduces memory bandwidth by ~4x (no intermediate attention matrix storage)
+    - Enables tiling/blocking strategies for large sequences
+    - Better numerical stability through online softmax
+    - Critical for long sequence modeling (transformers)
+    
+    Args:
+        q: Query tensor of shape (batch_size, num_heads, seq_len_q, dim_head)
+        k: Key tensor of shape (batch_size, num_heads, seq_len_k, dim_head)
+        v: Value tensor of shape (batch_size, num_heads, seq_len_k, dim_head)
+        dim_head: Dimension per attention head (for scaling)
+        dropout_prob: Dropout probability for attention weights
+        causal: Whether to apply causal masking (for autoregressive models)
+        training: Whether in training mode (affects dropout)
+    
+    Returns:
+        Output tensor of shape (batch_size, num_heads, seq_len_q, dim_head)
+    
+    Note:
+        This is a high-level fusion. True FlashAttention requires custom CUDA
+        kernels with block-wise computation and recomputation strategies.
+        This implementation provides the interface for future optimization.
+    """
+    batch_size, num_heads, seq_len_q, d = q.shape
+    _, _, seq_len_k, _ = k.shape
+    
+    # Compute attention scores: Q @ K^T
+    # Shape: (batch, num_heads, seq_len_q, seq_len_k)
+    # Use batched matmul by reshaping
+    q_reshaped = q.reshape((batch_size * num_heads, seq_len_q, d))
+    k_reshaped = k.reshape((batch_size * num_heads, seq_len_k, d))
+    k_transposed = k_reshaped.transpose((1, 2))  # (batch*heads, d, seq_len_k)
+    
+    # Matmul: (batch*heads, seq_len_q, d) @ (batch*heads, d, seq_len_k)
+    # Result: (batch*heads, seq_len_q, seq_len_k)
+    scores = matmul(q_reshaped, k_transposed)
+    
+    # Scale by sqrt(dim_head)
+    scale = (dim_head ** 0.5)
+    scores = scores / scale
+    
+    # Apply causal mask if needed
+    if causal:
+        # Create causal mask: upper triangular matrix of -inf
+        mask_np = -np.finfo(np.float32).max * np.triu(
+            np.ones((seq_len_q, seq_len_k), dtype=np.float32), 
+            k=seq_len_k - seq_len_q + 1
+        )
+        from ..backend_ndarray import ndarray as nd
+        mask = Tensor(nd.array(mask_np, device=q.device), device=q.device, requires_grad=False)
+        mask_broadcast = broadcast_to(mask.reshape((1, seq_len_q, seq_len_k)), scores.shape)
+        scores = scores + mask_broadcast
+    
+    # Softmax: compute exp(x - max(x)) / sum(exp(x - max(x)))
+    # For numerical stability, subtract max per row
+    scores_reshaped = scores.reshape((batch_size, num_heads, seq_len_q, seq_len_k))
+    
+    # Find max along last dimension for stability
+    max_scores = Tensor(
+        scores_reshaped.realize_cached_data().max(axis=3),
+        device=scores.device,
+        dtype=scores.dtype,
+        requires_grad=False
+    )
+    max_scores = max_scores.reshape((batch_size, num_heads, seq_len_q, 1))
+    max_scores = broadcast_to(max_scores, scores_reshaped.shape)
+    
+    # Compute softmax
+    exp_scores = (scores_reshaped - max_scores).exp()
+    sum_exp = summation(exp_scores, axes=3).reshape((batch_size, num_heads, seq_len_q, 1))
+    sum_exp = broadcast_to(sum_exp, exp_scores.shape)
+    attn_weights = exp_scores / sum_exp
+    
+    # Apply dropout during training
+    if training and dropout_prob > 0.0:
+        # Simple dropout: multiply by mask and scale
+        dropout_mask_np = (np.random.rand(*attn_weights.shape) > dropout_prob).astype(np.float32)
+        from ..backend_ndarray import ndarray as nd
+        dropout_mask = Tensor(
+            nd.array(dropout_mask_np, device=q.device),
+            device=q.device,
+            requires_grad=False
+        )
+        attn_weights = attn_weights * dropout_mask / (1 - dropout_prob)
+    
+    # Apply attention to values: attn @ V
+    # attn_weights: (batch, num_heads, seq_len_q, seq_len_k)
+    # v: (batch, num_heads, seq_len_k, dim_head)
+    # Result: (batch, num_heads, seq_len_q, dim_head)
+    attn_reshaped = attn_weights.reshape((batch_size * num_heads, seq_len_q, seq_len_k))
+    v_reshaped = v.reshape((batch_size * num_heads, seq_len_k, d))
+    
+    output = matmul(attn_reshaped, v_reshaped)  # (batch*heads, seq_len_q, dim_head)
+    output = output.reshape((batch_size, num_heads, seq_len_q, d))
+    
+    return output
 
 
 # Export all fused operations
@@ -284,4 +477,6 @@ __all__ = [
     'fused_batchnorm_relu', 
     'fused_linear_batchnorm',
     'fused_linear_batchnorm_relu',
+    'fused_conv_batchnorm2d_relu',
+    'fused_multihead_attention',
 ]

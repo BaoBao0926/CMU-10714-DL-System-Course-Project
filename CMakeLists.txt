@@ -183,6 +183,3 @@ if(HIP_AVAILABLE)
 else()
   message(STATUS "✗ HIP backend will NOT be compiled (ROCm not found)")
 endif()
-
-
-

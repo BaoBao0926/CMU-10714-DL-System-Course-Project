@@ -71,4 +71,3 @@ class AdaptiveAvgPool2d(Module):
         self.output_size = output_size
     def forward(self,x:Tensor)->Tensor:
         return ops.adaptive_avg_pool2d(x,self.output_size)
-

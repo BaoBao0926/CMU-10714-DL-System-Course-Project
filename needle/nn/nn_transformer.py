@@ -23,6 +23,8 @@ class MultiHeadAttention(Module):
     def __init__(
         self,
         *,
+        embed_dim = None,
+        num_heads = None,
         dropout = 0.,
         causal = False,
         device = None,
@@ -31,6 +33,8 @@ class MultiHeadAttention(Module):
 
         super().__init__()
 
+        self.embed_dim = embed_dim
+        self.num_heads = num_heads
         self.device = device
         self.dtype = dtype
 

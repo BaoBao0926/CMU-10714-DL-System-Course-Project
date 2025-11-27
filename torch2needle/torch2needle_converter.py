@@ -1,6 +1,8 @@
 import sys, os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+from needle.nn.nn_basic import Module, Identity, Linear, Flatten, ReLU, Sequential, BatchNorm1d, LayerNorm1d, Dropout, Residual, SoftmaxLoss
+from needle.nn.nn_basic import ADD, SUB
 from needle.nn.nn_basic import Module, Identity, Linear, Flatten, ReLU, Sequential, BatchNorm1d, LayerNorm1d, Dropout, BatchNorm2d
 from needle.nn.nn_basic import ADD, SUB
 from needle.nn.nn_conv import Conv, MaxPool2d, AdaptiveAvgPool2d
@@ -120,7 +122,7 @@ def build_executable_model(torch_model, fx_graph, node_to_layer, torch_mapping_n
             else:
                 # 其他层直接使用其默认表示
                 return repr(layer).replace('\n', '\n' + pad)
-        
+            
         def forward(self, *args):
             # 执行 FX 图
             env = {}
@@ -130,9 +132,13 @@ def build_executable_model(torch_model, fx_graph, node_to_layer, torch_mapping_n
                     env[node.name] = args[0] if len(args) == 1 else args[len(env)]
                 elif node.op == "call_module":
                     # 调用模块
-                    needle_layer = self.node_to_layer[node.name]
+                    needle_layer = self.node_to_layer.get(node.name, Identity())
                     inputs = [env[arg.name] for arg in node.all_input_nodes]
-                    env[node.name] = needle_layer(inputs[0])  # 模块调用只接受单个输入
+                    # 处理输入
+                    if inputs and needle_layer:
+                        env[node.name] = needle_layer(inputs[0])
+                    else:
+                        env[node.name] = needle_layer()
                 elif node.op == "call_function":
                     # 调用函数 - 直接对张量进行操作
                     # 获取输入张量

@@ -20,21 +20,25 @@ from needle.ops.ops_fused import (
     fused_batchnorm_relu,
     fused_linear_batchnorm,
     fused_linear_batchnorm_relu,
+    fused_conv_batchnorm2d_relu,
 )
 import needle.init as init
 from needle.nn.nn_basic import (
-    Module, Linear, ReLU, Sequential, BatchNorm1d, 
+    Module, Linear, ReLU, Sequential, BatchNorm1d, BatchNorm2d,
     LayerNorm1d, Dropout, Identity, Flatten, Parameter
 )
+from needle.nn.nn_conv import Conv
 from typing import Any, List, Tuple, Optional
 
 try:
     from fusion_pattrern import (
-        FusionPattern, LinearReLUPattern, LinearBatchNormPattern, BatchNormReLUPattern, LinearBatchNormReLUPattern
+        FusionPattern, LinearReLUPattern, LinearBatchNormPattern, BatchNormReLUPattern, 
+        LinearBatchNormReLUPattern, ConvBatchNorm2dReLUPattern
     )
 except ImportError:
     from operator_fusion.fusion_pattrern import (
-        FusionPattern, LinearReLUPattern, LinearBatchNormPattern, BatchNormReLUPattern, LinearBatchNormReLUPattern
+        FusionPattern, LinearReLUPattern, LinearBatchNormPattern, BatchNormReLUPattern, 
+        LinearBatchNormReLUPattern, ConvBatchNorm2dReLUPattern
     )
 
 # ============================================================================
@@ -55,10 +59,11 @@ class OperatorFusion:
         """
         if patterns is None:
             self.patterns = patterns = [
-                LinearBatchNormReLUPattern(), 
-                LinearBatchNormPattern(),
-                LinearReLUPattern(),
-                BatchNormReLUPattern(),
+                ConvBatchNorm2dReLUPattern(),  # Conv+BN+ReLU (ResNet pattern)
+                LinearBatchNormReLUPattern(),  # Linear+BN+ReLU
+                LinearBatchNormPattern(),      # Linear+BN
+                LinearReLUPattern(),           # Linear+ReLU
+                BatchNormReLUPattern(),        # BN+ReLU
             ]
         else:
             self.patterns = patterns
@@ -66,7 +71,7 @@ class OperatorFusion:
         self.fusion_count = 0  # the number of fusions performed
         self.fusion_log = []   # the fusion log
     
-    def fuse_sequential(self, sequential: Sequential) -> Sequential:
+    def fuse_sequential(self, sequential: Sequential,train=True) -> Sequential:
         """
         fuse operator on Sequential module
         
@@ -81,13 +86,20 @@ class OperatorFusion:
         
         modules = list(sequential.modules)
         fused_modules = []
+        fusion_info = [] # record fusion information
         i = 0
         
         # the basic algorithm is: iterate through the modules, at each position try to match any fusion pattern
         while i < len(modules):
             # iterate nested Sequential modules recursively
             if isinstance(modules[i], Sequential):
-                fused_modules.append(self.fuse_sequential(modules[i]))
+                fused_child, _ = self.fuse_sequential(modules[i],train)
+                fused_modules.append(fused_child)
+                fusion_info.append({
+                    "type":"nested",
+                    "module": fused_child,
+                    "consumed": 1,
+                })
                 i += 1
                 continue
             
@@ -98,9 +110,18 @@ class OperatorFusion:
                 if pattern.match(modules, i):
                     # perform fusion
                     fused_module, consumed = pattern.fuse(modules, i)
+                    if hasattr(fused_module, 'training'):
+                        fused_module.training = train
                     fused_modules.append(fused_module)
-                    
                     # record fusion information
+                    # first update this record to fusion_info
+                    fusion_info.append({
+                        "type":"fused",
+                        "pattern": pattern.__class__.__name__,
+                        "consumed": consumed,
+                        "fused_module": fused_module,  
+                    })
+
                     self.fusion_count += 1
                     pattern_name = pattern.__class__.__name__.replace("Pattern", "")
                     original_modules = [type(m).__name__ for m in modules[i:i+consumed]]
@@ -118,53 +139,122 @@ class OperatorFusion:
             # if no pattern matched, keep the original module
             if not matched:
                 fused_modules.append(modules[i])
+                fusion_info.append({
+                    "type":"original",
+                    "module": modules[i],
+                    "consumed": 1
+                })
                 i += 1
         
-        return Sequential(*fused_modules)
+        return Sequential(*fused_modules),fusion_info
+    
+    # def fuse_model(self, model: Module) -> Module:
+    #     """
+    #     fuse operators on the entire model
+        
+    #     Args:
+    #         model: Model to be fused
+            
+    #     Returns:
+    #         Module: Fused model
+    #     """
+    #     self.fusion_count = 0
+    #     self.fusion_log = []
+        
+    #     # If the model itself is a Sequential, fuse directly
+    #     if isinstance(model, Sequential):
+    #         return self.fuse_sequential(model)
+        
+    #     # Check if it is an FXGraphExecutor (by checking for layer_N attributes)
+    #     layer_attrs = sorted([name for name in dir(model) if name.startswith('layer_') and name.split('_')[1].isdigit()])
+    #     if layer_attrs:
+    #         # FXGraphExecutor case: extract all layer_N, fuse them, and replace back
+    #         layers = [getattr(model, attr) for attr in layer_attrs]
+    #         temp_sequential = Sequential(*layers)
+    #         fused_sequential = self.fuse_sequential(temp_sequential)
+            
+    #         # Replace back to FXGraphExecutor
+    #         for i, fused_layer in enumerate(fused_sequential.modules):
+    #             attr_name = f"layer_{i}"
+    #             if hasattr(model, attr_name):
+    #                 delattr(model, attr_name)
+    #             setattr(model, attr_name, fused_layer)
+    #             # Update _layer_to_name if it exists
+    #             if hasattr(model, '_layer_to_name'):
+    #                 model._layer_to_name[id(fused_layer)] = attr_name
+            
+    #         # Clean up extra layer attributes
+    #         for i in range(len(fused_sequential.modules), len(layers)):
+    #             attr_name = f"layer_{i}"
+    #             if hasattr(model, attr_name):
+    #                 delattr(model, attr_name)
+            
+    #         return model
+        
+    #     # Otherwise, recursively process all Sequential submodules and complex modules in the model
+    #     for attr_name in dir(model):
+    #         if attr_name.startswith('_'):
+    #             continue
+    #         try:
+    #             attr = getattr(model, attr_name, None)
+    #         except:
+    #             continue
+                
+    #         if attr is None or not isinstance(attr, Module):
+    #             continue
+                
+    #         if isinstance(attr, Sequential):
+    #             fused = self.fuse_sequential(attr)
+    #             setattr(model, attr_name, fused)
+    #         elif not isinstance(attr, (Linear, ReLU, BatchNorm1d, LayerNorm1d, Dropout, Identity, Flatten)):
+    #             # Recursively process complex submodules
+    #             self.fuse_model(attr)
+        
+    #     return model
     
     def fuse_model(self, model: Module) -> Module:
-        """
-        fuse operators on the entire model
-        
-        Args:
-            model: Model to be fused
-            
-        Returns:
-            Module: Fused model
-        """
         self.fusion_count = 0
         self.fusion_log = []
-        
-        # If the model itself is a Sequential, fuse directly
+
+        #If the model itself is a Sequential, fuse directly
         if isinstance(model, Sequential):
-            return self.fuse_sequential(model)
+            fused_sequential,fusion_info = self.fuse_sequential(model,model.training)
+            self._update_fx_graph_mapping(model,model.modules, fused_sequential,fusion_info)
+            return fused_sequential
         
-        # Check if it is an FXGraphExecutor (by checking for layer_N attributes)
-        layer_attrs = sorted([name for name in dir(model) if name.startswith('layer_') and name.split('_')[1].isdigit()])
+        # 检查是否是 FXGraphExecutor（通过检查是否有 layer_N 属性）
+        layer_attrs = sorted([name for name in dir(model) if name.startswith('layer_') and name.split('_')[1].isdigit()],
+                             key=lambda x: int(x.split('_')[1]))
         if layer_attrs:
-            # FXGraphExecutor case: extract all layer_N, fuse them, and replace back
+            # FXGraphExecutor 情况：提取所有 layer_N，融合它们，并替换回去
             layers = [getattr(model, attr) for attr in layer_attrs]
-            temp_sequential = Sequential(*layers)
-            fused_sequential = self.fuse_sequential(temp_sequential)
             
-            # Replace back to FXGraphExecutor
+            # 创建临时 Sequential 进行融合
+            temp_sequential = Sequential(*layers)
+            fused_sequential,fusion_info = self.fuse_sequential(temp_sequential,model.training)
+            
+            # important update: need to update original FX graph mapping
+            # otherwise, the fused layers won't be recognized in the FX graph execution!!
+            self._update_fx_graph_mapping(model, layers, fusion_info)
+            
+            # 替换回 FXGraphExecutor
             for i, fused_layer in enumerate(fused_sequential.modules):
                 attr_name = f"layer_{i}"
                 if hasattr(model, attr_name):
                     delattr(model, attr_name)
                 setattr(model, attr_name, fused_layer)
-                # Update _layer_to_name if it exists
+                # 更新 _layer_to_name 映射
                 if hasattr(model, '_layer_to_name'):
                     model._layer_to_name[id(fused_layer)] = attr_name
             
-            # Clean up extra layer attributes
+            # 清理多余的 layer 属性
             for i in range(len(fused_sequential.modules), len(layers)):
                 attr_name = f"layer_{i}"
                 if hasattr(model, attr_name):
                     delattr(model, attr_name)
-            
+
             return model
-        
+            
         # Otherwise, recursively process all Sequential submodules and complex modules in the model
         for attr_name in dir(model):
             if attr_name.startswith('_'):
@@ -180,12 +270,71 @@ class OperatorFusion:
             if isinstance(attr, Sequential):
                 fused = self.fuse_sequential(attr)
                 setattr(model, attr_name, fused)
-            elif not isinstance(attr, (Linear, ReLU, BatchNorm1d, LayerNorm1d, Dropout, Identity, Flatten)):
+            # TODO:this line may cause issues if there are custom modules that can be fused
+            elif not isinstance(attr, (Linear, ReLU, BatchNorm1d, LayerNorm1d, Dropout, Identity, Flatten,Conv,BatchNorm2d)):
                 # Recursively process complex submodules
                 self.fuse_model(attr)
         
         return model
     
+    def _update_fx_graph_mapping(self, model, original_layers, fusion_info):
+        """
+        更新 FXGraphExecutor 的节点到层映射关系，确保融合后的层能正确执行
+        """
+        if not hasattr(model, 'node_to_layer'):
+            return
+        
+        # 构建节点名称到融合层的映射
+        node_mapping_updates = {}
+        
+        fused_idx = 0
+        orig_idx = 0
+        
+        for info in fusion_info:
+            if info["type"] == "fused":
+                # 融合层：将多个原始层映射到同一个融合层
+                consumed = info["consumed"]
+                fused_module = info["fused_module"]
+                
+                for i in range(consumed): 
+                    if orig_idx + i < len(original_layers):
+                        # 找到使用这个原始层的所有节点
+                        for node_name, layer in model.node_to_layer.items():
+                            if layer is original_layers[orig_idx + i]:
+                                if i == 0:  # 第一个层映射到融合层
+                                    node_mapping_updates[node_name] = fused_module
+                                else:  # 其他被融合的层映射到Identity #TODO: Identity may be removed afterward
+                                    node_mapping_updates[node_name] = Identity()
+                                break
+                
+                orig_idx += consumed
+                fused_idx += 1
+                
+            elif info["type"] == "original":
+                # 原始层：一对一映射
+                if orig_idx < len(original_layers):
+                    original_module = info["module"]
+                    # 找到使用这个原始层的所有节点
+                    for node_name, layer in model.node_to_layer.items():
+                        if layer is original_layers[orig_idx]:
+                            node_mapping_updates[node_name] = original_module
+                            break
+                    orig_idx += 1
+                    fused_idx += 1
+                    
+            elif info["type"] == "nested":
+                # 嵌套 Sequential：暂时按一对一处理，如果需要可以递归处理
+                if orig_idx < len(original_layers):
+                    nested_module = info["module"]
+                    for node_name, layer in model.node_to_layer.items():
+                        if layer is original_layers[orig_idx]:
+                            node_mapping_updates[node_name] = nested_module
+                    orig_idx += 1
+                    fused_idx += 1
+        
+        # 应用更新
+        model.node_to_layer.update(node_mapping_updates)
+
     def print_fusion_report(self):
         """Print fusion report"""
         print(f"\n{'='*60}")
@@ -221,11 +370,43 @@ class OperatorFusion:
             "pattern_counts": pattern_counts,
             "fusion_log": self.fusion_log
         }
+    def _ensure_mapping_consistency(self, model):
+        """
+        确保节点映射与层属性一致
+        """
+        if not hasattr(model, 'node_to_layer'):
+            return
+        
+        # 构建当前层属性到层的映射
+        current_layers = {}
+        for attr_name in dir(model):
+            if attr_name.startswith('layer_'):
+                layer = getattr(model, attr_name)
+                current_layers[attr_name] = layer
+        
+        # 检查 node_to_layer 中的层是否都在当前层属性中
+        for node_name, layer in model.node_to_layer.items():
+            layer_found = any(id(layer) == id(current_layer) for current_layer in current_layers.values())
+            if not layer_found:
+                print(f"Warning: Layer for node {node_name} not found in current model attributes")
 
 
 # ============================================================================
 # Main function to start operator fusion
 # ============================================================================
+
+def fuse_model_with_mapping(self, model: Module) -> Module:
+    """
+    执行融合并确保映射正确更新
+    """
+    # 执行常规融合
+    fused_model = self.fuse_model(model)
+    
+    # 确保 FXGraphExecutor 的映射已更新
+    if hasattr(fused_model, 'node_to_layer'):
+        self._ensure_mapping_consistency(fused_model)
+    
+    return fused_model
 
 def fuse_operators(model: Module, verbose: bool = True) -> Module:
     """
@@ -239,14 +420,15 @@ def fuse_operators(model: Module, verbose: bool = True) -> Module:
         Module: Fused model
     """
     # Pattern can be increamental added
-    patterns = [
-        LinearBatchNormReLUPattern(), 
-        LinearBatchNormPattern(),
-        LinearReLUPattern(),
-        BatchNormReLUPattern(),
-    ]
-    fusion_engine = OperatorFusion(patterns=patterns)
-    fused_model = fusion_engine.fuse_model(model)
+    # patterns = [
+    #     LinearBatchNormReLUPattern(), 
+    #     LinearBatchNormPattern(),
+    #     LinearReLUPattern(),
+    #     BatchNormReLUPattern(),
+    # ]
+    fusion_engine = OperatorFusion()
+    #fused_model = fusion_engine.fuse_model(model)
+    fused_model = fuse_model_with_mapping(fusion_engine, model)
     
     if verbose:
         fusion_engine.print_fusion_report()
@@ -278,21 +460,63 @@ if __name__ == "__main__":
     print("="*60)
     
     # Create a simple test model
+    # test_model = Sequential(
+    #     Linear(10, 20),
+    #     ReLU(),
+    #     Linear(20, 30),
+    #     BatchNorm1d(30),
+    #     ReLU(),
+    #     Linear(30, 10)
+    # )
+    # convolutional test model
     test_model = Sequential(
-        Linear(10, 20),
+        Conv(3, 16, kernel_size=3, stride=1,
+             bias=True),
+        BatchNorm2d(16),
         ReLU(),
-        Linear(20, 30),
-        BatchNorm1d(30),
+        Conv(16, 32, kernel_size=3, stride=1,
+             bias=True),
+        BatchNorm2d(32),
         ReLU(),
-        Linear(30, 10)
     )
-    
-    print("原始模型:")
+    print("原始模型")
     print(test_model)
     print()
-    
+
     # Perform fusion
     fused_model = fuse_operators(test_model, verbose=True)
-    
-    print("融合后模型:")
+    print("融合后模型")
     print(fused_model)
+    # test forward pass of fused model and original model
+    x = Tensor(init.rand(5,3,32,32))
+    original_output = test_model(x)
+    fused_output = fused_model(x)
+    print()
+    print("原始模型输出:")
+    print(original_output)
+    print("融合后模型输出:")
+    print(fused_output)
+    print("输出差异 (原始 - 融合):")
+    print((original_output.numpy() - fused_output.numpy()).sum())  # should be close
+    # #test_model.eval()  # Set to eval mode for BatchNorm
+    # print("原始模型:")
+    # print(test_model)
+    # print()
+    
+    # # Perform fusion
+    # fused_model = fuse_operators(test_model, verbose=True)
+    
+    # print("融合后模型:")
+    # print(fused_model)
+
+    # # test forward pass of fused model and original model
+    # x = Tensor(init.rand(5,10))
+    # original_output = test_model(x)
+    # fused_output = fused_model(x)
+    # print()
+    # print("原始模型输出:")
+    # print(original_output)
+    # print("融合后模型输出:")
+    # print(fused_output)
+    # print("输出差异 (原始 - 融合):")
+    # print((original_output.numpy() - fused_output.numpy()).sum())  # should be close to 0
