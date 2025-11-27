@@ -267,8 +267,8 @@ def test_resnet_model(device=ndl.cpu(),dtype="float32"):
 
 if __name__ == "__main__":
     all_passed = True
-    device = ndl.cpu() # this is correct, it is ndl.cpu() not ndl.numpy_cpu()\
-    # device = ndl.cuda() 
+    #device = ndl.cpu() # this is correct, it is ndl.cpu() not ndl.numpy_cpu()\
+    device = ndl.cuda() 
 
 
     dtype = "float32"

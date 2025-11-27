@@ -435,7 +435,7 @@ def test_language_model_training(device):
 
 device = ndl.cpu()
 #test_matmul_batched_backward(ndl.cpu())
-#test_train_cifar10(ndl.cpu())
+test_train_cifar10(ndl.cpu())
 #test_rnn_cell(batch_size=15,input_size=1,hidden_size=12,bias=True,init_hidden=True,nonlinearity='tanh',device=device)
 #test_rnn(seq_length=13,num_layers=2,batch_size=15,input_size=1,hidden_size=12,bias=True,init_hidden=True,nonlinearity='tanh',device=device)
 #test_lstm_cell(batch_size=15,input_size=1,hidden_size=12,bias=True,init_hidden=True,device=device)
@@ -443,7 +443,7 @@ device = ndl.cpu()
 #test_ptb_dataset(batch_size=15,bptt=32,train=True,device=device)
 # test_language_model_implementation(seq_length=13,num_layers=2,batch_size=15,embedding_size=34,hidden_size=12,
 #                                    init_hidden=False,output_size=1000,seq_model='lstm',device=device)
-test_language_model_training(device)
+#test_language_model_training(device)
 
 
 # params = (32, 8, 16, 3, 2)

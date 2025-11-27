@@ -61,6 +61,7 @@ class MaxPool2d(Module):
         self.kernel_size = kernel_size
         self.stride = stride
         self.pad = padding
+    @profile_operation
     def forward(self,x:Tensor)->Tensor:
         return ops.max_pool2d(x,self.kernel_size,self.stride,self.pad)
 
@@ -71,6 +72,7 @@ class AdaptiveAvgPool2d(Module):
     def __init__(self,output_size=(1,1)):
         super().__init__()
         self.output_size = output_size
+    @profile_operation
     def forward(self,x:Tensor)->Tensor:
         return ops.adaptive_avg_pool2d(x,self.output_size)
 
