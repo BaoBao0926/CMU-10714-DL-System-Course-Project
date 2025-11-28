@@ -188,8 +188,8 @@ class ConvBatchNorm2dReLU(Module):
         """Perform fused Conv2d + BatchNorm2d + ReLU operation using fused op"""
         # Use fused operation for forward pass
         out = fused_conv_batchnorm2d_relu(
-            x, self.weight, self.conv_bias,
-            self.bn_weight, self.bn_bias,
+            x, self.weight, self.out_channels,
+            self.conv_bias,self.bn_weight, self.bn_bias,
             self.running_mean, self.running_var,
             stride=self.stride, padding=self.padding,
             eps=self.eps, momentum=self.momentum, training=self.training

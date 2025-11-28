@@ -5,8 +5,9 @@ from typing import Optional, List, Tuple, Union
 
 from ..autograd import NDArray
 from ..autograd import Op, Tensor, Value, TensorOp
-from ..autograd import TensorTuple, TensorTupleOp
+from ..init import zeros
 from ..backend_ndarray import ndarray_backend_hip as hip_backend
+from ..backend_ndarray import hip
 
 # NOTE: we will import numpy as the array_api
 # as the backend for our computations, this line will change in later homeworks
@@ -25,12 +26,12 @@ class Conv(TensorOp):
         ### BEGIN YOUR SOLUTION
         ## HIP backend convolution use NCHW format##
         N,Cin,H,W = A.shape
-        K,_,_,Cout = B.shape
+        Cout,_,K,_ = B.shape
         P = self.padding
         S = self.stride
-        H_out = (H +2*P - K+1) // S 
-        W_out = (W +2*P - K+1) // S 
-        out = NDArray.make((N,Cout,H_out,W_out),device=A.device,dtype=A.dtype)
+        H_out = (H +2*P - K) // S +1
+        W_out = (W +2*P - K) // S +1
+        out = NDArray.make((N,Cout,H_out,W_out),device=A.device)
         hip_backend.conv(A.compact()._handle,B.compact()._handle,out._handle,N,Cin,H,W,Cout,K,K,S,P)
         return out
         ### END YOUR SOLUTION
@@ -80,13 +81,13 @@ class BatchNorm2d(TensorOp):
         self.dim = channel
         self.eps = eps
         self.momentum = momentum
-        self.weight = weight 
-        self.bias = bias
-        self.running_mean = running_mean
-        self.running_var = running_var
+        self.weight = weight.cached_data 
+        self.bias = bias.cached_data
+        self.running_mean = running_mean.cached_data
+        self.running_var = running_var.cached_data
     def compute(self, x: NDArray) -> NDArray:
         batch,_,h,w = x.shape
-        out = NDArray.make((batch,self.dim,h,w),device=x.device,dtype=x.dtype)
+        out = NDArray.make((batch,self.dim,h,w),device=x.device)
         hip_backend.batchnorm2d(x.compact()._handle,
                                 out._handle,
                                 self.weight.compact()._handle,
@@ -117,21 +118,21 @@ class ConvBatchnorm2dRelu(TensorOp):
         self.out_channel = out_channel
         self.eps = eps
         self.momentum = momentum
-        self.bias = bias
-        self.scale = scale
-        self.shift = shift
-        self.running_mean = running_mean
-        self.running_var = running_var
-    def compute(self, X: NDArray, W: NDArray) -> NDArray:
-        N,Cin,H,W = X.shape
-        K,_,_,Cout = w.shape
+        self.bias = bias.cached_data if bias is not None else zeros(out_channel,device=hip()).cached_data
+        self.scale = scale.cached_data
+        self.shift = shift.cached_data
+        self.running_mean = running_mean.cached_data
+        self.running_var = running_var.cached_data
+    def compute(self, A: NDArray, B: NDArray) -> NDArray:
+        N,Cin,H,W = A.shape
+        Cout,_,K,_ = B.shape
         P = self.padding
         S = self.stride
-        H_out = (H +2*P - K+1) // S 
-        W_out = (W +2*P - K+1) // S 
-        out = NDArray.make((N,Cout,H_out,W_out),device=X.device,dtype=X.dtype)
-        hip_backend.convbn2drelu(X.compact()._handle,out._handle,
-                                 W.compact()._handle,self.bias.compact()._handle,
+        H_out = (H +2*P - K) // S +1
+        W_out = (W +2*P - K) // S +1
+        out = NDArray.make((N,Cout,H_out,W_out),device=A.device)
+        hip_backend.convbn2drelu(A.compact()._handle,out._handle,
+                                 B.compact()._handle,self.bias.compact()._handle,
                                  self.scale.compact()._handle,self.shift.compact()._handle,
                                  self.running_mean.compact()._handle,
                                  self.running_var.compact()._handle,

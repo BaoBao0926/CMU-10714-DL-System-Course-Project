@@ -12,6 +12,7 @@ lib:
 	@echo "Build Summary:"
 	@if [ -f needle/backend_ndarray/ndarray_backend_hip.cpython-*.so ]; then \
 	  echo "✓ HIP backend compiled"; \
+	  echo "   Hint: export LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/lib64:\$$LD_LIBRARY_PATH"; \
 	fi
 	@if [ -f needle/backend_ndarray/ndarray_backend_cpu.cpython-*.so ]; then \
 	  echo "✓ CPU backend compiled"; \

@@ -146,6 +146,30 @@ if(HIP_AVAILABLE)
   find_package(HIP REQUIRED)
   message(STATUS "Found HIP, building HIP backend for AMD GPU")
 
+  # Try to find MIOpen
+  find_path(MIOPEN_INCLUDE_DIR miopen/miopen.h PATHS ${ROCM_HOME}/include /opt/rocm/include)
+  find_library(MIOPEN_LIBRARY NAMES MIOpen miopen PATHS ${ROCM_HOME}/lib ${ROCM_HOME}/lib64 /opt/rocm/lib /opt/rocm/lib64)
+  if(NOT MIOPEN_LIBRARY)
+    message(FATAL_ERROR "MIOpen library not found. Expected in ${ROCM_HOME}/lib or ${ROCM_HOME}/lib64")
+  endif()
+  message(STATUS "MIOpen include: ${MIOPEN_INCLUDE_DIR}")
+  message(STATUS "MIOpen library: ${MIOPEN_LIBRARY}")
+
+  # Create HIP module (single target definition)
+  add_library(ndarray_backend_hip MODULE src/ndarray_backend_hip.cpp)
+  set_source_files_properties(src/ndarray_backend_hip.cpp PROPERTIES LANGUAGE HIP)
+  target_include_directories(ndarray_backend_hip PRIVATE ${HIP_INCLUDE_DIRS} ${MIOPEN_INCLUDE_DIR})
+  
+  # Link HIP and MIOpen
+  target_link_libraries(ndarray_backend_hip PRIVATE hip::host hip::device ${MIOPEN_LIBRARY} ${LINKER_LIBS})
+
+  # Ensure runtime can find libMIOpen.so
+  # Ensure runtime can find libMIOpen.so via rpath
+  set_target_properties(ndarray_backend_hip PROPERTIES
+    BUILD_RPATH "${ROCM_HOME}/lib;${ROCM_HOME}/lib64;/opt/rocm/lib;/opt/rocm/lib64"
+    INSTALL_RPATH "${ROCM_HOME}/lib;${ROCM_HOME}/lib64;/opt/rocm/lib;/opt/rocm/lib64"
+  )
+
   include_directories(SYSTEM ${HIP_INCLUDE_DIRS})
 
   # Set HIP compiler flags
@@ -161,13 +185,7 @@ if(HIP_AVAILABLE)
     set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} --offload-arch=gfx900")
   endif()
 
-  # Add HIP module
-  add_library(ndarray_backend_hip MODULE src/ndarray_backend_hip.cpp)
-
-  # Set HIP as the language for this file
-  set_source_files_properties(src/ndarray_backend_hip.cpp PROPERTIES LANGUAGE HIP)
-
-  target_link_libraries(ndarray_backend_hip PUBLIC ${LINKER_LIBS} hip::host hip::device)
+  # PyBind11 properties
   pybind11_extension(ndarray_backend_hip)
   pybind11_strip(ndarray_backend_hip)
 

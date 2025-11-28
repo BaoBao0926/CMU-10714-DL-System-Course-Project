@@ -22,7 +22,7 @@ from typing import Optional
 from ..autograd import Tensor
 from .ops_mathematic import matmul, broadcast_to, summation, reshape, relu, multiply, add, conv
 from .ops_hip import conv_batchnorm2d_relu
-from backend_ndarray import ndarray as nd
+from ..backend_ndarray import ndarray as nd
 import numpy as np
 
 
@@ -266,6 +266,7 @@ def fused_linear_batchnorm_relu(
 def fused_conv_batchnorm2d_relu(
     x: Tensor,
     weight: Tensor,
+    out_channels: int,
     conv_bias: Optional[Tensor],
     bn_weight: Tensor,
     bn_bias: Tensor,
@@ -312,12 +313,10 @@ def fused_conv_batchnorm2d_relu(
     """
     if x.device == nd.hip():
         return conv_batchnorm2d_relu(
-            x, weight, conv_bias,
-            bn_weight, bn_bias,
+            x, weight, out_channels,stride, padding,
+            conv_bias, bn_weight, bn_bias,
             running_mean, running_var,
-            stride, padding,
-            eps, momentum,
-            training
+            eps, momentum
         )
     else:
         # Convert from NCHW to NHWC for conv operation

@@ -1,5 +1,4 @@
 from .ops_mathematic import *
-
 from .ops_logarithmic import *
 from .ops_tuple import *
 from .ops_fused import *
@@ -13,8 +12,13 @@ def _setup_backend_ops():
         # 从 ops_hip 导入并覆盖全局符号
         try:
             #from .ops_hip import *
-            # 可选：显式列出要覆盖的算子
-            # from .ops_hip import matmul, conv, relu, ...
+            # 显式列出要覆盖的算子
+            from . import ops_hip 
+            globals().update({
+                "conv": ops_hip.conv,
+                "batchnorm2d": ops_hip.batchnorm2d,
+                "conv_batchnorm2d_relu": ops_hip.conv_batchnorm2d_relu,
+            })
             print("[Needle] Using HIP-optimized operators")
         except ImportError as e:
             print(f"[Needle] Warning: Failed to load HIP ops: {e}")
