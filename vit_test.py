@@ -11,7 +11,6 @@ from needle.autograd import Tensor
 from torch2needle.torch2needle_converter import torch2needle_fx
 from torch2needle.weight_converter import load_torch_weights_by_mapping
 
-
 # ==============================================================  
 # Step 1: 加载 PyTorch ViT  
 # ==============================================================  

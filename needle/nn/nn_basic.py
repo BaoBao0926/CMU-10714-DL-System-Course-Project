@@ -117,6 +117,12 @@ class ReLU(Module):
         return ops.relu(x)
         ### END YOUR SOLUTION
 
+class GELU(Module):
+    def forward(self, x: Tensor) -> Tensor:
+        ### BEGIN YOUR SOLUTION
+        return ops.gelu(x)
+        ### END YOUR SOLUTION
+
 class Sequential(Module):
     def __init__(self, *modules: Module) -> None:
         super().__init__()

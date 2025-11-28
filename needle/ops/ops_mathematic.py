@@ -6,7 +6,7 @@ from typing import Optional, List, Tuple, Union
 from ..autograd import NDArray
 from ..autograd import Op, Tensor, Value, TensorOp
 from ..autograd import TensorTuple, TensorTupleOp
-import numpy
+import math
 
 # NOTE: we will import numpy as the array_api
 # as the backend for our computations, this line will change in later homeworks
@@ -736,4 +736,21 @@ class AdaptiveAvgPool2d(TensorOp):
 def adaptive_avg_pool2d(x,output_size=(1,1)):
     return AdaptiveAvgPool2d(output_size=output_size)(x)
 
+class GELU(TensorOp):
+    def compute(self, a):
+        ### BEGIN YOUR SOLUTION
+        return 0.5 * a * (1 + array_api.tanh(array_api.sqrt(2 / math.pi) * (a + 0.044715 * (a ** 3))))
+        ### END YOUR SOLUTION
 
+    def gradient(self, out_grad, node):
+        ### BEGIN YOUR SOLUTION
+        x = node.inputs[0]
+        tanh_out = array_api.tanh(array_api.sqrt(2 / math.pi) * (x.cached_data + 0.044715 * (x.cached_data ** 3)))
+        sech2 = 1 - tanh_out ** 2
+        coeff = array_api.sqrt(2 / math.pi) * (1 + 3 * 0.044715 * (x.cached_data ** 2))
+        gelu_grad = 0.5 * (1 + tanh_out) + 0.5 * x.cached_data * sech2 * coeff
+        return out_grad * Tensor(gelu_grad,device=out_grad.device)
+        ### END YOUR SOLUTION
+
+def gelu(a):
+    return GELU()(a)
