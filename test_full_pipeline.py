@@ -4,7 +4,7 @@
 import sys
 import os
 sys.path.append(os.path.dirname(__file__))
-
+os.environ["NEEDLE_BACKEND"] = "hip"
 import torch
 import torch.nn as nn
 import numpy as np
@@ -210,8 +210,8 @@ def _run_pipeline_test(torch_model, input_shape,device=ndl.cpu(),dtype="fl"):
 
 if __name__ == "__main__":
     all_passed = True
-    device = ndl.cpu() # this is correct, it is ndl.cpu() not ndl.numpy_cpu()
-    #device = ndl.hip()
+    #device = ndl.cpu() # this is correct, it is ndl.cpu() not ndl.numpy_cpu()
+    device = ndl.hip()
     dtype = "float32"
     
     # # # 测试 1: 简单双分支模型

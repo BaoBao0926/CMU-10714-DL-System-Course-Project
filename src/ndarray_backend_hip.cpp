@@ -1,6 +1,5 @@
 #include <hip/hip_runtime.h>
 #include <miopen/miopen.h>
-#include <miopen/fusion.h>
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -785,10 +784,24 @@ void Conv(const HipArray& a, const HipArray& b, HipArray* out,
     
     // Get output dimensions
     int out_n, out_c, out_h, out_w;
-    miopenGetConvolutionForwardOutputDim(conv_desc, input_desc, kernel_desc, &out_n, &out_c, &out_h, &out_w);
-    
+    status = miopenGetConvolutionForwardOutputDim(conv_desc, input_desc, kernel_desc, &out_n, &out_c, &out_h, &out_w);
+    if (status != miopenStatusSuccess)
+    {
+      throw std::runtime_error("Fail to get conv output dims");
+    }
+   
     // Set output tensor descriptor
     miopenSet4dTensorDescriptor(output_desc, miopenFloat, out_n, out_c, out_h, out_w);
+
+    // Sanity: output buffer size must match
+    size_t expected = static_cast<size_t>(out_n) * out_c * out_h * out_w;
+    if (expected != out->size) {
+      std::ostringstream oss;
+      oss << "Conv output size mismatch. MIOpen=("
+          << out_n << "," << out_c << "," << out_h << "," << out_w
+          << ") total=" << expected << " but out->size=" << out->size;
+      throw std::runtime_error(oss.str());
+    }
     
     // Find the best convolution algorithm
     size_t workspace_size = 0;
@@ -819,6 +832,9 @@ void Conv(const HipArray& a, const HipArray& b, HipArray* out,
                             conv_desc, algo, &beta, output_desc, out->ptr,
                             workspace, workspace_size);
     
+    // Ensure conv completes before further ops (e.g., your HIP reduce/sum)
+    hipDeviceSynchronize();
+
     // Cleanup
     if (workspace) hipFree(workspace);
     miopenDestroyTensorDescriptor(input_desc);
@@ -892,6 +908,25 @@ void BatchNorm2D(const HipArray& input, HipArray* output,
     miopenDestroy(handle);
   }
 
+__global__ void ReLUKernel(const scalar_t* input, scalar_t* output, size_t size) {
+  // Calculate the global index of the thread.
+  size_t gid = blockIdx.x * blockDim.x + threadIdx.x;
+  if (gid < size) {
+    output[gid] = fmaxf(0.0f, input[gid]);
+  }
+}
+
+__global__ void addChannelBiasKernel(const scalar_t* input, const scalar_t* bias, scalar_t* output,
+                                 uint32_t batch, uint32_t channels, uint32_t height, uint32_t width) {
+  // Calculate the global index of the thread.
+  size_t gid = blockIdx.x * blockDim.x + threadIdx.x;
+  size_t total_size = static_cast<size_t>(batch) * channels * height * width;
+  if (gid < total_size) {
+    size_t c = (gid / (height * width)) % channels; // Calculate channel index
+    output[gid] = input[gid] + bias[c];
+  }
+}
+
 void ConvBNReluFused(const HipArray& input, HipArray* output,
                      const HipArray& weight, const HipArray& bias,
                      const HipArray& scale, const HipArray& shift,
@@ -901,82 +936,114 @@ void ConvBNReluFused(const HipArray& input, HipArray* output,
                      uint32_t stride, uint32_t padding, float eps = 1e-5f) {
   
   miopenHandle_t handle;
-  miopenCreate(&handle);
-  
-  // create fusion plan for MIOpen
-  miopenFusionPlanDescriptor_t fusePlanDesc;
-  miopenTensorDescriptor_t input_desc;
+  miopenStatus_t status = miopenCreate(&handle);
+  if (status != miopenStatusSuccess) {
+    throw std::runtime_error("Fail to create MIOpen handle");
+  }
+
+  // Input/output descriptors (NCHW)
+  miopenTensorDescriptor_t input_desc, output_desc, weight_desc, bn_desc;
   miopenCreateTensorDescriptor(&input_desc);
-  miopenSet4dTensorDescriptor(input_desc, miopenFloat, batch, in_channels, in_height, in_width);
-  fusePlanDesc = miopenCreateFusionPlan(miopenVerticalFusion, input_desc);
-  
-  // define fusion op descriptor
-  miopenFusionOpDescriptor_t convOp;
-  miopenFusionOpDescriptor_t bnOp;
-  miopenFusionOpDescriptor_t activOp;
-  
-  miopenStatus_t status;
-  
-  // add conv to fusion plan
+  miopenCreateTensorDescriptor(&output_desc);
+  miopenCreateTensorDescriptor(&weight_desc);
+  miopenCreateTensorDescriptor(&bn_desc);
+
+
+  // Output dims from conv
   miopenConvolutionDescriptor_t conv_desc;
   miopenCreateConvolutionDescriptor(&conv_desc);
-  miopenInitConvolutionDescriptor(conv_desc, miopenConvolution, padding, padding, stride, stride, 1, 1);
-  
-  miopenTensorDescriptor_t weight_desc;
-  miopenCreateTensorDescriptor(&weight_desc);
+  // set descriptors (NCHW)
+  miopenSet4dTensorDescriptor(input_desc, miopenFloat, batch, in_channels, in_height, in_width);
   miopenSet4dTensorDescriptor(weight_desc, miopenFloat, out_channels, in_channels, kernel_h, kernel_w);
-  
-  status = miopenCreateOpConvForward(fusePlanDesc, &convOp, conv_desc, weight_desc);
+  miopenInitConvolutionDescriptor(conv_desc, miopenConvolution,
+                                  padding, padding, stride, stride, 1, 1);
+
+  int out_n, out_c, out_h, out_w;
+  status = miopenGetConvolutionForwardOutputDim(conv_desc, input_desc, weight_desc,
+                                                &out_n, &out_c, &out_h, &out_w);
+
+  // std::cout << "Conv output dims: (" << out_n << "," << out_c << "," << out_h << "," << out_w << ")\n";
   if (status != miopenStatusSuccess) {
-    throw std::runtime_error("Fail to create convolution operator in fusion plan");
+    throw std::runtime_error("Fail to get conv output dims");
+  }
+  miopenSet4dTensorDescriptor(output_desc, miopenFloat, out_n, out_c, out_h, out_w);
+
+  // Sanity: output buffer size must match
+  size_t total = static_cast<size_t>(out_n) * out_c * out_h * out_w;
+  if (total != output->size) {
+    std::ostringstream oss;
+    oss << "Conv output size mismatch. MIOpen=("
+        << out_n << "," << out_c << "," << out_h << "," << out_w
+        << ") total=" << total << " but out->size=" << output->size;
+    throw std::runtime_error(oss.str());
   }
   
-  // add batchnorm to fusion plan
-  miopenTensorDescriptor_t bn_desc;
-  miopenCreateTensorDescriptor(&bn_desc);
-  miopenSet4dTensorDescriptor(bn_desc, miopenFloat, 1, out_channels, 1, 1);
+  // Workspace for convolution
+  size_t workspace_size = 0;
+  miopenConvolutionForwardGetWorkSpaceSize(handle, weight_desc, input_desc, conv_desc, output_desc, &workspace_size);
   
-  status = miopenCreateOpBatchNormInference(fusePlanDesc, &bnOp, bn_desc);
-  if (status != miopenStatusSuccess) {
-    throw std::runtime_error("Fail to create batchnorm operator in fusion plan")
+  // Allocate workspace
+  void* workspace = nullptr;
+  if (workspace_size > 0) {
+    hipMalloc(&workspace, workspace_size);
   }
   
-  // add relu to fusion plan
-  status = miopenCreateOpActivationForward(fusePlanDesc, &activOp, miopenActivationRELU);
-  if (status != miopenStatusSuccess) {
-    throw std::runtime_error("Fail to create relu operator in fusion plan")
-  }
+  // // Get algorithm
+  // miopenConvFwdAlgorithm_t algo = miopenConvolutionFwdAlgoGEMM;
+
+  miopenConvAlgoPerf_t perf_results;
+  int returned_algo_count = 0;
+  miopenFindConvolutionForwardAlgorithm(
+      handle, input_desc, input.ptr, weight_desc, weight.ptr,
+      conv_desc, output_desc, output->ptr, 
+      1, &returned_algo_count, &perf_results, 
+      workspace, workspace_size, false);
+      
+  miopenConvFwdAlgorithm_t algo = perf_results.fwd_algo;
   
-  // compile fusion plan
-  status = miopenCompileFusionPlan(handle, fusePlanDesc);
-  if (status != miopenStatusSuccess) {
-    throw std::runtime_error("Fail to compile fusion plan")
-  }
-  
-  // set alpha and beta for convolution
+  // Perform convolution
   float alpha = 1.0f, beta = 0.0f;
-  // set conv param
-  status = miopenSetOpArgsConvForward(convOp, &alpha, &beta, weight.ptr, bias.ptr);
-  // set batchnorm2d param
-  status = miopenSetOpArgsBatchNormInference(bnOp, &alpha, &beta, scale.ptr, shift.ptr, 
-                                           running_mean.ptr, running_var.ptr, eps);
-  // set relu param
-  miopenActivationDescriptor_t activ_desc;
-  miopenCreateActivationDescriptor(&activ_desc);
-  miopenSetActivationDescriptor(activ_desc, miopenActivationRELU, 0.0, 0.0, 1.0);
-  status = miopenSetOpArgsActivationForward(activOp, &alpha, &beta, activ_desc);
-  
-  // perform fusion
-  status = miopenExecuteFusionPlan(handle, fusePlanDesc, input_desc, input.ptr, 
-                                 input_desc, output->ptr, nullptr);
-  
-  // clear resource
-  miopenDestroyFusionPlan(fusePlanDesc);
-  miopenDestroyTensorDescriptor(input_desc);
-  miopenDestroyTensorDescriptor(weight_desc);
-  miopenDestroyTensorDescriptor(bn_desc);
+  status = miopenConvolutionForward(handle, &alpha, input_desc, input.ptr, weight_desc, weight.ptr,
+                          conv_desc, algo, &beta, output_desc, output->ptr,
+                          workspace, workspace_size);
+                         
+  hipDeviceSynchronize();
+  // Ensure conv completes before further ops (e.g., your HIP reduce/sum)
+  if(status != miopenStatusSuccess) {
+    throw std::runtime_error("Fail to execute convolution forward");
+  }
+
+  // Add bias
+  HipDims dim = HipOneDim(total);
+  addChannelBiasKernel<<<dim.grid, dim.block>>>(output->ptr, bias.ptr, output->ptr,
+                                                out_n, out_c, out_h, out_w);
+  hipDeviceSynchronize();
+
+  // BatchNorm (inference mode)
+  miopenSet4dTensorDescriptor(bn_desc, miopenFloat, 1, out_c, 1, 1);
+  status = miopenBatchNormalizationForwardInference(
+      handle, miopenBNSpatial, &alpha, &beta,
+      output_desc, output->ptr,     // input
+      output_desc, output->ptr,  // output
+      bn_desc, scale.ptr, shift.ptr,           // scale (gamma), bias (beta)
+      running_mean.ptr, running_var.ptr,      // running mean & variance
+      eps                        // epsilon
+  );
+  if (status != miopenStatusSuccess) {
+    throw std::runtime_error("Fail to execute batchnorm forward inference");
+  }
+
+  // ReLU activation
+  ReLUKernel<<<dim.grid, dim.block>>>(output->ptr, output->ptr, total);
+  hipDeviceSynchronize();
+
+  // Cleanup
+  if (workspace) hipFree(workspace);
   miopenDestroyConvolutionDescriptor(conv_desc);
-  miopenDestroyActivationDescriptor(activ_desc);
+  miopenDestroyTensorDescriptor(bn_desc);
+  miopenDestroyTensorDescriptor(weight_desc);
+  miopenDestroyTensorDescriptor(output_desc);
+  miopenDestroyTensorDescriptor(input_desc);
   miopenDestroy(handle);
 }
 
