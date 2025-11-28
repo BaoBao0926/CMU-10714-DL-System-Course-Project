@@ -17,6 +17,7 @@ dependencies = [
     "tqdm>=4.67.1",
     "wandb>=0.19.7",
     "pytorch-pretrained-vit~=0.0.7",
+    "torchvision >=0.13"
 ]
 
 [build-system]

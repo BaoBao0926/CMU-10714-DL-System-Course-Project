@@ -1047,6 +1047,127 @@ void ConvBNReluFused(const HipArray& input, HipArray* output,
   miopenDestroy(handle);
 }
 
+__global__ void max_pool2d(const scalar_t* input, scalar_t* output,int batch_size, int channels,
+                            int input_h, int input_w, int output_h, int output_w,
+                            int kernel_h, int kernel_w, int stride_h, int stride_w,
+                            int pad_h, int pad_w){
+
+    // index and param relates to each block is processing
+    const int out_x_base = blockIdx.x * blockDim.x;
+    const int out_y_base = blockIdx.y * blockDim.y;
+    const int c = blockIdx.z; 
+    const int n = c / channels; // 第n个样本
+    const int channel = c % channels;
+
+    // 该block对应输入图片起始位置
+    const int input_x_start = out_x_base * stride_w - pad_w;
+    const int input_y_start = out_y_base * stride_h - pad_h;
+    
+    // share memory大小
+    const int shared_w = (blockDim.x -1) * stride_w + kernel_w;
+    const int shared_h = (blockDim.y -1) * stride_h + kernel_h;
+    extern __shared__ float shared_input[];
+
+    // 协作加载input data到share memory
+    for (int idx = threadIdx.y * blockDim.x + threadIdx.x; idx < shared_h * shared_w; idx+= blockDim.x * blockDim.y)
+    {
+        // idx在share memory的x,y坐标
+        const int local_y = idx / shared_w;
+        const int local_x = idx % shared_w;
+        // idx转换到整张图片的输入位置
+        const int global_y = input_y_start + local_y;
+        const int global_x = input_x_start + local_x;
+        // 转换的global索引边界检查
+        if (global_y >=0 && global_y < input_h && global_x >=0 && global_x < input_w)
+        {
+            const int global_idx = ((n * channels + channel) * input_h + global_y) * input_w + global_x;
+            shared_input[local_y * shared_w + local_x] = input[global_idx];
+        }else{
+            shared_input[local_y * shared_w + local_x] = -INFINITY;
+        }
+        
+    }
+
+    __syncthreads();
+
+    // 计算每个线程对应的输出图片的idx
+    const int output_x = out_x_base + threadIdx.x;
+    const int output_y = out_y_base + threadIdx.y;
+
+    if (output_x < output_w && output_y < output_h )
+    {
+        // 计算share memory的起始位置
+        const int share_start_x = output_x * stride_w - pad_w - input_x_start;
+        const int share_start_y = output_y * stride_h - pad_h - input_y_start;
+
+        float max_val = -INFINITY;
+        // 一个线程会找一个kernel sizexkernel size图片内的最大值
+        for (int kh = 0; kh < kernel_h; kh++)
+        {
+            for (int kw = 0; kw < kernel_w; kw++)
+            {
+                const int shared_x = share_start_x + kw;
+                const int shared_y = share_start_y + kh;
+                if (shared_x >= 0 && shared_x < shared_w && shared_y >=0 && shared_y < shared_h)
+                {
+                    max_val = fmaxf(max_val,shared_input[shared_y * shared_w + shared_x]);
+                }
+            }   
+        } 
+        // LOAD TO OUTPUT 
+        if(max_val > -INFINITY){
+            const int output_idx = ((n*channels + channel) * output_h + output_y) * output_w + output_x;
+            output[output_idx] = max_val;
+        }
+    }
+}
+
+void MaxPool2D(const HipArray& input, HipArray* output,
+               uint32_t batch_size, uint32_t channels,
+               uint32_t input_h, uint32_t input_w,
+               uint32_t kernel_h, uint32_t kernel_w,
+               uint32_t stride_h, uint32_t stride_w,
+               uint32_t pad_h, uint32_t pad_w) {
+    /**
+     * Perform 2D Max Pooling using custom kernel.
+     * 
+     * Args:
+     *   input: input array of shape (batch_size, channels, input_h, input_w)
+     *   output: output array
+     *   batch_size: batch size
+     *   channels: number of channels
+     *   input_h: input height
+     *   input_w: input width
+     *   kernel_h: kernel height
+     *   kernel_w: kernel width
+     *   stride_h: stride height
+     *   stride_w: stride width
+     *   pad_h: padding height
+     *   pad_w: padding width
+     */
+
+    // Calculate output dimensions
+    int output_h = (input_h + 2 * pad_h - kernel_h) / stride_h + 1;
+    int output_w = (input_w + 2 * pad_w - kernel_w) / stride_w + 1;
+
+    dim3 blockDim(16, 16);
+    dim3 gridDim((output_w + blockSize.x - 1) / blockSize.x,
+                  (output_h + blockSize.y - 1) / blockSize.y,
+                  batch_size * channels);
+
+    size_t shared_mem_size = ((blockSize.x -1) * stride_w + kernel_w) *
+                             ((blockSize.y -1) * stride_h + kernel_h) *
+                             sizeof(scalar_t);
+
+    max_pool2d<<<gridSize, blockSize, shared_mem_size>>>(input.ptr, output->ptr,
+                                                          batch_size, channels,
+                                                          input_h, input_w,
+                                                          output_h, output_w,
+                                                          kernel_h, kernel_w,
+                                                          stride_h, stride_w,
+                                                          pad_h, pad_w);
+    hipDeviceSynchronize();
+
 
 }  // namespace hip
 }  // namespace needle
@@ -1120,4 +1241,5 @@ PYBIND11_MODULE(ndarray_backend_hip, m) {
   m.def("conv",Conv);
   m.def("batchnorm2d",BatchNorm2D);
   m.def("convbn2drelu",ConvBNReluFused);
+  m.def("maxpool2d",MaxPool2D);
 }

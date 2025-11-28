@@ -21,7 +21,9 @@ These functions are designed to:
 from typing import Optional
 from ..autograd import Tensor
 from .ops_mathematic import matmul, broadcast_to, summation, reshape, relu, multiply, add, conv
-from .ops_hip import conv_batchnorm2d_relu
+import os
+if os.environ.get("NEEDLE_BACKEND") == "hip":
+    from .ops_hip import conv_batchnorm2d_relu
 from ..backend_ndarray import ndarray as nd
 import numpy as np
 

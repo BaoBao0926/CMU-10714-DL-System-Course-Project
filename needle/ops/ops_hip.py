@@ -149,3 +149,25 @@ def conv_batchnorm2d_relu(X: Tensor, W: Tensor, out_channel:int, stride: Optiona
                           eps: float = 1e-5, momentum: float = 0.1) -> Tensor:
     return ConvBatchnorm2dRelu(out_channel,stride, padding, bias, scale, shift,
                                running_mean, running_var, eps, momentum)(X, W)
+class MaxPool2D(TensorOp):
+    def __init__(self,kernel_size=3,stride=1,padding=0):
+        self.kernel_size = kernel_size
+        self.stride = stride
+        self.padding = padding
+    def compute(self, x):
+        N,C,H,W = x.shape
+        K = self.kernel_size
+        S = self.stride
+        P = self.padding
+        H_out = (H +2*P - K) // S +1
+        W_out = (W +2*P - K) // S +1
+        out = NDArray.make((N,C,H_out,W_out),device=x.device)
+        hip_backend.maxpool2d(x.compact()._handle,out._handle,N,C,H,W,K,K,S,P)
+        return out
+    def gradient(self, out_grad: Tensor, node: Tensor) -> List[Tensor]:
+        ### implement MaxPool2D gradient for AMD backend if needed ###
+        raise NotImplementedError()
+
+def max_pool2d(x: Tensor, kernel_size=3, stride=1, padding=0) -> Tensor:
+    return MaxPool2D(kernel_size,stride,padding)(x)
+
