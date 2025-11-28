@@ -7,6 +7,7 @@ import needle.init as init
 import numpy as np
 from .nn_basic import Parameter, Module
 from needle.needle_profiling import profile_operation
+from ..backend_ndarray import hip
 
 
 class Conv(Module):
@@ -43,13 +44,13 @@ class Conv(Module):
     @profile_operation
     def forward(self, x: Tensor) -> Tensor:
         ### BEGIN YOUR SOLUTION
-        x = x.transpose((0,2,3,1)) # N,C,H,W -> N,H,W,C
+        x = x.transpose((0,2,3,1)) if x.device != hip() else x# N,C,H,W -> N,H,W,C
         x = ops.conv(x,self.weight,stride=self.stride,padding=self.kernel_size//2)
         if self.bias is not None:
             #bias_shape = tuple(1 if (dim!=self.out_channels) else self.out_channels for dim in res.shape)
             bias = self.bias.broadcast_to(x.shape)
             x += bias
-        return x.transpose((0,3,1,2))
+        return x.transpose((0,3,1,2)) if x.device != hip() else x
         ### END YOUR SOLUTION
 
 class MaxPool2d(Module):
@@ -75,4 +76,3 @@ class AdaptiveAvgPool2d(Module):
     @profile_operation
     def forward(self,x:Tensor)->Tensor:
         return ops.adaptive_avg_pool2d(x,self.output_size)
-

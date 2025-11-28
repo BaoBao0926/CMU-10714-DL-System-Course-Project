@@ -5,6 +5,7 @@ from needle.autograd import Tensor
 from needle import ops
 import needle.init as init
 import numpy as np
+from ..backend_ndarray import hip
 
 from needle.needle_profiling import profile_operation
 
@@ -212,6 +213,8 @@ class BatchNorm2d(BatchNorm1d):
     @profile_operation
     def forward(self, x: Tensor):
         # nchw -> nhcw -> nhwc
+        if x.device == hip() and self.training==False:
+            return ops.batchnorm2d(x, self.dim, self.weight, self.bias, self.running_mean, self.running_var, self.eps, self.momentum)
         s = x.shape
         _x = x.transpose((1, 2)).transpose((2, 3)).reshape((s[0] * s[2] * s[3], s[1]))
         y = super().forward(_x).reshape((s[0], s[2], s[3], s[1]))

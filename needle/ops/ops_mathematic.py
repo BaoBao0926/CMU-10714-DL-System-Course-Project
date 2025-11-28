@@ -737,3 +737,84 @@ def adaptive_avg_pool2d(x,output_size=(1,1)):
     return AdaptiveAvgPool2d(output_size=output_size)(x)
 
 
+class MaxPool2d(TensorOp):
+    def __init__(self,kernel_size:Optional[int] = 3,stride: Optional[int] = 1, padding: Optional[int] = 0):
+        self.kernel_size = kernel_size
+        self.stride = stride
+        self.padding = padding
+    
+    def compute(self, x):
+        batch_size, channels, in_height, in_width = x.shape
+        pad = self.padding
+        kernel_size = self.kernel_size
+        stride = self.stride
+        # add padding
+        if self.padding > 0:
+            x = x.pad(((0, 0), (0, 0), (pad, pad), (pad, pad)), constant_value=float('-inf'))
+        else:
+            x = x
+        # compute output height and width, then create new view of ndarray
+        # The same logic as Conv op
+        out_height = (in_height + 2 * pad - kernel_size) // stride + 1
+        out_width = (in_width + 2 * pad - kernel_size) // stride + 1
+        shape_6d = (batch_size, channels, out_height, out_width, kernel_size, kernel_size)
+        strides_6d = (
+            x.strides[0],  # batch
+            x.strides[1],  # channel  
+            stride * x.strides[2],  # height
+            stride * x.strides[3],  # width
+            x.strides[2],  # kernel height
+            x.strides[3]   # kernel width
+        )
+        
+        windows_6d = x.as_strided( 
+            shape=shape_6d, 
+            strides=strides_6d
+        )
+        
+        windows_5d = windows_6d.compact().reshape((batch_size, channels, out_height, out_width, kernel_size * kernel_size))
+        # find the maximum value of the last axis
+        output = windows_5d.max(axis=len(windows_5d.shape) - 1)
+        
+        return output
+    def gradient(self, out_grad, node):
+        ## if needed, implement backward of maxpool
+        raise NotImplementedError()
+    
+def max_pool2d(x,kernel_size=3,stride=1,padding=0):
+    return MaxPool2d(kernel_size,stride,padding)(x)
+
+class AdaptiveAvgPool2d(TensorOp):
+    def __init__(self,output_size:Optional[Tuple]=(1,1)):
+        self.output_size = output_size
+    def compute(self, x):
+        batch_size, channels, in_height, in_width = x.shape
+        out_height, out_width = self.output_size
+        assert (in_height % out_height == 0) and (in_width % out_width == 0),"cannot apply since input size cannot be divided evenly by output size"
+
+        # 计算池化核大小
+        kernel_h = in_height // out_height
+        kernel_w = in_width // out_width
+        
+        # 重塑张量并计算平均值
+        new_shape = (batch_size,channels,out_height,kernel_h,out_width,kernel_w)
+        new_strides = (
+            x.strides[0],
+            x.strides[1],
+            kernel_h * x.strides[2],
+            x.strides[2],
+            kernel_w * x.strides[3],
+            x.strides[3]
+        )
+
+        window_6d = x.as_strided(new_shape,new_strides)
+        window_6d = window_6d.compact().permute((0,1,2,4,3,5))
+        window_5d = window_6d.compact().reshape((batch_size, channels, out_height, out_width, kernel_h*kernel_w))
+        output = array_api.mean(window_5d, axis=len(window_5d.shape)-1)
+        return output
+    def gradient(self, out_grad, node):
+        ## if needed, implement backward of AdaptiveAveragepool2d
+        raise NotImplementedError()
+
+def adaptive_avg_pool2d(x,output_size=(1,1)):
+    return AdaptiveAvgPool2d(output_size=output_size)(x)

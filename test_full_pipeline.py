@@ -11,14 +11,13 @@ import numpy as np
 import needle as ndl
 from needle import Tensor
 from needle.nn import Sequential, Linear, ReLU, BatchNorm1d
-from needle.needle_profiling import *
 
 # 导入转换和融合工具
 from torch2needle.torch2needle_converter import torch2needle_fx
 from torch2needle.weight_converter import load_torch_weights_by_mapping
 from operator_fusion.operator_fusion import OperatorFusion
 
-from test_torch_model import ResNetConv18
+from test_torch_model import ResNetConv18, SimpleTransformerModel
 
 # 创建一个简单的 PyTorch 模型（Sequential，适合融合）
 class SimpleTorchModel(nn.Module):
@@ -208,101 +207,33 @@ def _run_pipeline_test(torch_model, input_shape,device=ndl.cpu(),dtype="fl"):
     
     return True
 
-def convert_to_needle(torch_model,device=ndl.cpu(),dtype="float32"):
-    """将 PyTorch 模型转换为 Needle 模型并加载权重"""
-    needle_model, trace_log, torch_mapping_needle = torch2needle_fx(torch_model,device,dtype)
-    load_torch_weights_by_mapping(torch_mapping_needle, verbose=True,device=device,dtype=dtype)
-    needle_model.eval()
-    return needle_model
-
-def convert_to_needle_with_fusion(torch_model,device=ndl.cpu(),dtype="float32"):
-    """将 PyTorch 模型转换为 Needle 模型，加载权重并进行算子融合"""
-    needle_model = convert_to_needle(torch_model,device,dtype)
-    fusion_engine = OperatorFusion()
-    fused_model = fusion_engine.fuse_model(needle_model)
-    fused_model.eval()
-    return fused_model
-
-def _measure_performance(needle_model, input_shape, device=ndl.cpu(), dtype="float32", iterations=100):
-    """测量模型的性能"""
-    print("\n【性能测量】")
-    needle_model.eval()
-    test_input = Tensor(np.random.randn(*input_shape), device=device, dtype=dtype)
-    
-    # 预热
-    for _ in range(10):
-        _ = needle_model(test_input)
-    
-    import time
-    start_time = time.time()
-    for _ in range(iterations):
-        _ = needle_model(test_input)
-    end_time = time.time()
-    
-    total_time = end_time - start_time
-    avg_time = total_time / iterations
-    print(f"总时间: {total_time:.4f} 秒，平均时间: {avg_time*1000:.4f} 毫秒/次")
-    
-    # 打印性能摘要
-    print_performance_summary()
-    return avg_time
-
-
-
-def test_simple_model(device=ndl.cpu(),dtype="float32"):
-    """测试简单的双分支模型"""
-    print("=" * 80)
-    print("测试 1: 简单双分支模型")
-    print("=" * 80)
-    return _run_pipeline_test(SimpleTorchModel(), (5, 10),device,dtype)
-
-
-def test_resnet_model(device=ndl.cpu(),dtype="float32"):
-    """测试 ResNet 模型"""
-    print("\n" + "=" * 80)
-    print("测试 2: ResNet 模型")
-    print("=" * 80)
-    return _run_pipeline_test(ResNetModel(input_dim=32, num_classes=10), (5, 32),device,dtype)
-
 
 if __name__ == "__main__":
     all_passed = True
-    #device = ndl.cpu() # this is correct, it is ndl.cpu() not ndl.numpy_cpu()\
-    device = ndl.hip() 
-
-
+    #device = ndl.cpu() # this is correct, it is ndl.cpu() not ndl.numpy_cpu()
+    device = ndl.hip()
     dtype = "float32"
-    # 简单Torch模型profile
-    # torch_model = SimpleTorchModel()
+    
+    # # # 测试 1: 简单双分支模型
     # print("\n" + "=" * 80)
-    # print("SimpleTorchModel性能对比测试: 融合前后")
+    # print("测试 1: 简单双分支模型")
     # print("=" * 80)
-    # reset_performance_tracking()
-    # print("\n--- 未融合模型性能 ---")
-    # unoptimized_model = convert_to_needle(torch_model,device,dtype)
-    # avg_time_unfuse = _measure_performance(unoptimized_model,(16,10),device,dtype)
-    # print("\n--- 融合后模型性能 ---")
-    # reset_performance_tracking(performance_file_initialized=False, hard=True)
-    # fused_model = convert_to_needle_with_fusion(torch_model,device,dtype)
-    # avg_time_fuse = _measure_performance(fused_model,(16,10),device,dtype)
-    # print("\n" + "=" * 80)
-    # print(f"融合后平均时间比融合前平均时间减少了 {(avg_time_unfuse - avg_time_fuse)/avg_time_unfuse*100:.2f}%")
+    # model = SimpleTorchModel()
+    # all_passed &= _run_pipeline_test(model,(5, 10),device,dtype)
+    
+    # # # 测试 2: ResNet 模型
+    # print("\n\n" + "=" * 80)
+    # model = ResNetModel(input_dim=32, num_classes=10)
+    # print("测试 2: ResNet 模型（包含残差连接）")
+    # print("=" * 80)
+    # all_passed &= _run_pipeline_test(model,(5,32),device=device,dtype=dtype)
 
-   # ResNet模型profile
-    torch_model = ResNetConv18(num_classes=10)
-    print("\n" + "=" * 80)
-    print("ResNetConv18性能对比测试: 融合前后")
+    # # 测试 3: ResNet18 模型
+    print("\n\n" + "=" * 80)
+    model = ResNetConv18(num_classes=10)
+    print("测试 3: ResNet18 模型")
     print("=" * 80)
-    reset_performance_tracking()
-    print("\n--- 未融合模型性能 ---")
-    unoptimized_model = convert_to_needle(torch_model,device,dtype)
-    avg_time_unfuse = _measure_performance(unoptimized_model,(16,3,32,32),device,dtype)
-    print("\n--- 融合后模型性能 -\--")
-    reset_performance_tracking(performance_file_initialized=False, hard=True)
-    fused_model = convert_to_needle_with_fusion(torch_model,device,dtype)
-    avg_time_fuse = _measure_performance(fused_model,(16,3,32,32),device,dtype)
-    print("\n" + "=" * 80)      
-    print(f"融合后平均时间比融合前平均时间减少了 {(avg_time_unfuse - avg_time_fuse)/avg_time_unfuse*100:.2f}%")
+    all_passed &= _run_pipeline_test(model,(2,3,32,32),device=device,dtype=dtype)
     # 总结
     print("\n\n" + "=" * 80)
     if all_passed:

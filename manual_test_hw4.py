@@ -1,5 +1,7 @@
 import numpy as np
 import torch
+import os
+os.environ["NEEDLE_BACKEND"] = "hip"
 import needle as ndl
 import needle.nn as nn
 from needle import backend_ndarray as nd
@@ -137,6 +139,111 @@ def test_op_conv(Z_shape, W_shape, stride, padding, backward, device):
         assert err1 < 1e-2, "input grads match"
         assert err2 < 1e-2, "weight grads match"
     assert err3 < 1e-1, "outputs match %s, %s" % (y2, out2)
+
+def test_op_conv_hip(Z_shape, W_shape, stride, padding, backward, device):
+    np.random.seed(0)
+    import torch
+    _Z = np.random.randn(*Z_shape)*5
+    _Z = _Z.astype(np.float32)
+    _W = np.random.randn(*W_shape)*5
+    _W = _W.astype(np.float32)
+    Z = ndl.Tensor(_Z, device=device)
+    W = ndl.Tensor(_W, device=device)
+    y = ndl.conv(Z, W, padding=padding, stride=stride)
+    y2 = y.sum()
+    if backward:
+        y2.backward()
+    Ztch = torch.Tensor(_Z).float()
+    Ztch.requires_grad=True
+    Wtch = torch.Tensor(_W).float()
+    Wtch.requires_grad=True
+    out = torch.nn.functional.conv2d(Ztch, Wtch, padding=padding, stride=stride)
+    out2 = out.sum()
+    if backward:
+        out2.backward()
+    if backward:
+        err1 = np.linalg.norm(Ztch.grad.numpy() - Z.grad.numpy())
+        err2 = np.linalg.norm(Wtch.grad.numpy() - W.grad.numpy())
+    err3 = np.linalg.norm(out2.detach().numpy() - y2.numpy())
+    if backward:
+        assert err1 < 1e-2, "input grads match"
+        assert err2 < 1e-2, "weight grads match"
+    #assert err3 < 1e-1, "outputs match %s, %s" % (y2, out2)
+    np.testing.assert_allclose(out2.detach().numpy(), y2.numpy(), rtol=1e-4, atol=1e-4)
+
+def test_op_batchnorm2d_hip(X_shape, channel, device,eps=1e-5, momentum=0.1):
+    ### batchnorm in torch should adjust to eval mode! ###
+    np.random.seed(0)
+    import torch
+    _X = np.random.randn(*X_shape).astype(np.float32)
+    X = ndl.Tensor(_X, device=device)
+    weight = ndl.init.ones(channel, device=device)
+    bias = ndl.init.zeros(channel, device=device)
+    running_mean = ndl.init.zeros(channel, device=device)
+    running_var = ndl.init.ones(channel, device=device)
+    y = ndl.batchnorm2d(X, channel, weight, bias, running_mean, running_var, eps=eps, momentum=momentum)
+    Ztch = torch.Tensor(_X).float()
+    bn = torch.nn.BatchNorm2d(channel, eps=eps, momentum=momentum, affine=True, track_running_stats=True)
+    bn.eval()
+    bn.weight.data = torch.tensor(weight.cached_data.numpy())
+    bn.bias.data = torch.tensor(bias.cached_data.numpy())
+    bn.running_mean = torch.tensor(running_mean.cached_data.numpy())
+    bn.running_var = torch.tensor(running_var.cached_data.numpy())
+    y2 = bn(Ztch)
+    np.testing.assert_allclose(y2.detach().numpy(), y.numpy(), rtol=1e-4, atol=1e-4)
+
+def test_op_conv_bn_relu_hip(Z_shape, W_shape, out_channels, stride, padding, backward, device):
+    np.random.seed(0)
+    import torch
+    _Z = np.random.randn(*Z_shape)*5
+    _Z = _Z.astype(np.float32)
+    _W = np.random.randn(*W_shape)*5
+    _W = _W.astype(np.float32)
+    Z = ndl.Tensor(_Z, device=device)
+    W = ndl.Tensor(_W, device=device)
+    bn_weight = ndl.init.ones(out_channels, device=device)
+    bn_bias = ndl.init.zeros(out_channels, device=device)
+    running_mean = ndl.init.zeros(out_channels, device=device)
+    running_var = ndl.init.ones(out_channels, device=device)
+    y = ndl.fused_conv_batchnorm2d_relu(
+        Z, W, out_channels,
+        conv_bias=None,
+        bn_weight=bn_weight,
+        bn_bias=bn_bias,
+        running_mean=running_mean,
+        running_var=running_var,
+        stride=stride,
+        padding=padding,
+        eps=1e-5,
+        momentum=0.1
+    )
+    y2 = y.sum()
+    if backward:
+        y2.backward()
+    Ztch = torch.Tensor(_Z).float()
+    Ztch.requires_grad=True
+    Wtch = torch.Tensor(_W).float()
+    Wtch.requires_grad=True
+    bn = torch.nn.BatchNorm2d(out_channels, eps=1e-5, momentum=0.1, affine=True, track_running_stats=True)
+    bn.eval()
+    bn.weight.data = torch.tensor(bn_weight.cached_data.numpy())
+    bn.bias.data = torch.tensor(bn_bias.cached_data.numpy())
+    bn.running_mean = torch.tensor(running_mean.cached_data.numpy())
+    bn.running_var = torch.tensor(running_var.cached_data.numpy())
+    out = torch.nn.functional.conv2d(Ztch, Wtch, padding=padding, stride=stride)
+    out = bn(out)
+    out = torch.relu(out)
+    out2 = out.sum()
+    if backward:
+        out2.backward()
+    if backward:
+        err1 = np.linalg.norm(Ztch.grad.numpy() - Z.grad.numpy())
+        err2 = np.linalg.norm(Wtch.grad.numpy() - W.grad.numpy())
+    err3 = np.linalg.norm(out2.detach().numpy() - y2.numpy())
+    if backward:
+        assert err1 < 1e-2, "input grads match"
+        assert err2 < 1e-2, "weight grads match"
+    np.testing.assert_allclose(out2.detach().numpy(), y2.numpy(), rtol=1e-4, atol=1e-4)
 
 def test_init_kaiming_uniform(device):
     _A = np.random.randn(3, 3, 16, 8)
@@ -433,7 +540,7 @@ def test_language_model_training(device):
         np.testing.assert_allclose(5.632849, train_loss, atol=1e-5, rtol=1e-5)
         np.testing.assert_allclose(5.417056, test_loss, atol=1e-5, rtol=1e-5)
 
-device = ndl.cpu()
+device = ndl.hip()
 #test_matmul_batched_backward(ndl.cpu())
 test_train_cifar10(ndl.cpu())
 #test_rnn_cell(batch_size=15,input_size=1,hidden_size=12,bias=True,init_hidden=True,nonlinearity='tanh',device=device)
@@ -443,7 +550,7 @@ test_train_cifar10(ndl.cpu())
 #test_ptb_dataset(batch_size=15,bptt=32,train=True,device=device)
 # test_language_model_implementation(seq_length=13,num_layers=2,batch_size=15,embedding_size=34,hidden_size=12,
 #                                    init_hidden=False,output_size=1000,seq_model='lstm',device=device)
-#test_language_model_training(device)
+test_language_model_training(device)
 
 
 # params = (32, 8, 16, 3, 2)

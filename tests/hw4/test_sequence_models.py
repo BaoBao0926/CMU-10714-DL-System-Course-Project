@@ -17,8 +17,13 @@ from models import LanguageModel
 np.random.seed(3)
 
 
-_DEVICES = [ndl.cpu(), pytest.param(ndl.cuda(),
-    marks=pytest.mark.skipif(not ndl.cuda().enabled(), reason="No GPU"))]
+_DEVICES = [ndl.cpu(), 
+            pytest.param(
+            ndl.hip(), marks=pytest.mark.skipif(not ndl.hip().enabled(), reason="No AMD GPU")
+        ),
+    #         pytest.param(ndl.cuda(),
+    # marks=pytest.mark.skipif(not ndl.cuda().enabled(), reason="No GPU"))
+    ]
 
 
 BATCH_SIZES = [1, 15]
@@ -33,7 +38,7 @@ NONLINEARITIES = ['tanh', 'relu']
 @pytest.mark.parametrize("bias", BIAS)
 @pytest.mark.parametrize("init_hidden", INIT_HIDDEN)
 @pytest.mark.parametrize("nonlinearity", NONLINEARITIES)
-@pytest.mark.parametrize("device", _DEVICES, ids=["cpu", "cuda"])
+@pytest.mark.parametrize("device", _DEVICES, ids=["cpu", "hip"])
 def test_rnn_cell(batch_size, input_size, hidden_size, bias, init_hidden, nonlinearity, device):
     x = np.random.randn(batch_size, input_size).astype(np.float32)
     h0 = np.random.randn(batch_size, hidden_size).astype(np.float32)
@@ -66,7 +71,7 @@ def test_rnn_cell(batch_size, input_size, hidden_size, bias, init_hidden, nonlin
 @pytest.mark.parametrize("hidden_size", HIDDEN_SIZES)
 @pytest.mark.parametrize("bias", BIAS)
 @pytest.mark.parametrize("init_hidden", INIT_HIDDEN)
-@pytest.mark.parametrize("device", _DEVICES, ids=["cpu", "cuda"])
+@pytest.mark.parametrize("device", _DEVICES, ids=["cpu", "hip"])
 def test_lstm_cell(batch_size, input_size, hidden_size, bias, init_hidden, device):
     x = np.random.randn(batch_size, input_size).astype(np.float32)
     h0 = np.random.randn(batch_size, hidden_size).astype(np.float32)
@@ -108,7 +113,7 @@ NUM_LAYERS = [1, 2]
 @pytest.mark.parametrize("bias", BIAS)
 @pytest.mark.parametrize("init_hidden", INIT_HIDDEN)
 @pytest.mark.parametrize("nonlinearity", NONLINEARITIES)
-@pytest.mark.parametrize("device", _DEVICES, ids=["cpu", "cuda"])
+@pytest.mark.parametrize("device", _DEVICES, ids=["cpu", "hip"])
 def test_rnn(seq_length, num_layers, batch_size, input_size, hidden_size, bias, init_hidden, nonlinearity, device):
     x = np.random.randn(seq_length, batch_size, input_size).astype(np.float32)
     h0 = np.random.randn(num_layers, batch_size, hidden_size).astype(np.float32)
@@ -146,7 +151,7 @@ def test_rnn(seq_length, num_layers, batch_size, input_size, hidden_size, bias, 
 @pytest.mark.parametrize("hidden_size", HIDDEN_SIZES)
 @pytest.mark.parametrize("bias", BIAS)
 @pytest.mark.parametrize("init_hidden", INIT_HIDDEN)
-@pytest.mark.parametrize("device", _DEVICES, ids=["cpu", "cuda"])
+@pytest.mark.parametrize("device", _DEVICES, ids=["cpu", "hip"])
 def test_lstm(seq_length, num_layers, batch_size, input_size, hidden_size, bias, init_hidden, device):
     x = np.random.randn(seq_length, batch_size, input_size).astype(np.float32)
     h0 = np.random.randn(num_layers, batch_size, hidden_size).astype(np.float32)
@@ -190,7 +195,7 @@ SEQ_MODEL = ['rnn', 'lstm']
 @pytest.mark.parametrize("init_hidden", INIT_HIDDEN)
 @pytest.mark.parametrize("output_size", OUTPUT_SIZES)
 @pytest.mark.parametrize("seq_model", SEQ_MODEL)
-@pytest.mark.parametrize("device", _DEVICES, ids=["cpu", "cuda"])
+@pytest.mark.parametrize("device", _DEVICES, ids=["cpu", "hip"])
 def test_language_model_implementation(seq_length, num_layers, batch_size, embedding_size, hidden_size,
                         init_hidden, output_size, seq_model, device):
     #TODO add test for just nn.embedding?
@@ -221,7 +226,7 @@ def test_language_model_implementation(seq_length, num_layers, batch_size, embed
     for p in model.parameters():
         assert p.grad is not None
 
-@pytest.mark.parametrize("device", _DEVICES, ids=["cpu", "cuda"])
+@pytest.mark.parametrize("device", _DEVICES, ids=["cpu", "hip"])
 def test_language_model_training(device):
     corpus = ndl.data.Corpus("data/ptb", max_lines=20)
     seq_len = 10
@@ -238,7 +243,7 @@ def test_language_model_training(device):
     if str(device) == "cpu()":
         np.testing.assert_allclose(5.809671, train_loss, atol=1e-5, rtol=1e-5)
         np.testing.assert_allclose(5.391172, test_loss, atol=1e-5, rtol=1e-5)
-    elif str(device) == "cuda()":
+    elif str(device) == "hip()":
         np.testing.assert_allclose(5.632849, train_loss, atol=1e-5, rtol=1e-5)
         np.testing.assert_allclose(5.417056, test_loss, atol=1e-5, rtol=1e-5)
 

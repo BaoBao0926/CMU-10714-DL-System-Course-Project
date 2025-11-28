@@ -21,6 +21,8 @@ These functions are designed to:
 from typing import Optional
 from ..autograd import Tensor
 from .ops_mathematic import matmul, broadcast_to, summation, reshape, relu, multiply, add, conv
+from .ops_hip import conv_batchnorm2d_relu
+from ..backend_ndarray import ndarray as nd
 import numpy as np
 from needle.needle_profiling import profile_operation
 
@@ -266,6 +268,7 @@ def fused_linear_batchnorm_relu(
 def fused_conv_batchnorm2d_relu(
     x: Tensor,
     weight: Tensor,
+    out_channels: int,
     conv_bias: Optional[Tensor],
     bn_weight: Tensor,
     bn_bias: Tensor,
@@ -310,49 +313,57 @@ def fused_conv_batchnorm2d_relu(
         Input/output are in NCHW format for consistency with Conv module.
         Internally converts to NHWC for conv operation, then back to NCHW.
     """
-    # Convert from NCHW to NHWC for conv operation
-    x_nhwc = x.transpose((0, 2, 3, 1))  # N,C,H,W -> N,H,W,C
-    
-    # Convolution
-    out = conv(x_nhwc, weight, stride=stride, padding=padding)
-    
-    # Add conv bias if provided
-    if conv_bias is not None:
-        bias_broadcast = conv_bias.broadcast_to(out.shape)
-        out = out + bias_broadcast
-    
-    # Convert back to NCHW for BatchNorm2d
-    out_nchw = out.transpose((0, 3, 1, 2))  # N,H,W,C -> N,C,H,W
-    
-    # BatchNorm2d: process as (N*H*W, C)
-    N, C, H, W = out_nchw.shape
-    
-    # Reshape to (N*H*W, C) for batch norm computation
-    out_reshaped = out_nchw.transpose((1, 2)).transpose((2, 3)).reshape((N * H * W, C))
-    
-    if training:
-        # Compute batch statistics across N*H*W dimension
-        batch_size = N * H * W
-        mean = out_reshaped.sum(axes=0)/ batch_size  # shape: (1, C)
-        var = ((out_reshaped - mean.broadcast_to(out_reshaped.shape)) ** 2).sum(axes=0) / batch_size
+    if x.device == nd.hip():
+        return conv_batchnorm2d_relu(
+            x, weight, out_channels,stride, padding,
+            conv_bias, bn_weight, bn_bias,
+            running_mean, running_var,
+            eps, momentum
+        )
     else:
-        # Use running statistics
-        mean = running_mean
-        var = running_var
-    out_normalized = (out_reshaped - mean.broadcast_to(out_reshaped.shape)) / ((var.broadcast_to(out_reshaped.shape) + eps) ** 0.5)
-    # Apply affine transformation
-    weight_broadcast = bn_weight.broadcast_to(out_normalized.shape)
-    bias_broadcast = bn_bias.broadcast_to(out_normalized.shape)
-    out_bn = weight_broadcast * out_normalized + bias_broadcast
-    
-    # Reshape back to NCHW
-    out_bn_reshaped = out_bn.reshape((N, H, W, C))
-    out_final = out_bn_reshaped.transpose((2, 3)).transpose((1, 2))  # N,H,W,C -> N,C,H,W
-    
-    # Apply ReLU activation
-    return relu(out_final)
+        # Convert from NCHW to NHWC for conv operation
+        x_nhwc = x.transpose((0, 2, 3, 1))  # N,C,H,W -> N,H,W,C
+        
+        # Convolution
+        out = conv(x_nhwc, weight, stride=stride, padding=padding)
+        
+        # Add conv bias if provided
+        if conv_bias is not None:
+            bias_broadcast = conv_bias.broadcast_to(out.shape)
+            out = out + bias_broadcast
+        
+        # Convert back to NCHW for BatchNorm2d
+        out_nchw = out.transpose((0, 3, 1, 2))  # N,H,W,C -> N,C,H,W
+        
+        # BatchNorm2d: process as (N*H*W, C)
+        N, C, H, W = out_nchw.shape
+        
+        # Reshape to (N*H*W, C) for batch norm computation
+        out_reshaped = out_nchw.transpose((1, 2)).transpose((2, 3)).reshape((N * H * W, C))
+        
+        if training:
+            # Compute batch statistics across N*H*W dimension
+            batch_size = N * H * W
+            mean = out_reshaped.sum(axes=0)/ batch_size  # shape: (1, C)
+            var = ((out_reshaped - mean.broadcast_to(out_reshaped.shape)) ** 2).sum(axes=0) / batch_size
+        else:
+            # Use running statistics
+            mean = running_mean
+            var = running_var
+        out_normalized = (out_reshaped - mean.broadcast_to(out_reshaped.shape)) / ((var.broadcast_to(out_reshaped.shape) + eps) ** 0.5)
+        # Apply affine transformation
+        weight_broadcast = bn_weight.broadcast_to(out_normalized.shape)
+        bias_broadcast = bn_bias.broadcast_to(out_normalized.shape)
+        out_bn = weight_broadcast * out_normalized + bias_broadcast
+        
+        # Reshape back to NCHW
+        out_bn_reshaped = out_bn.reshape((N, H, W, C))
+        out_final = out_bn_reshaped.transpose((2, 3)).transpose((1, 2))  # N,H,W,C -> N,C,H,W
+        
+        # Apply ReLU activation
+        return relu(out_final)
 
-@profile_operation
+
 def fused_multihead_attention(
     q: Tensor,
     k: Tensor,

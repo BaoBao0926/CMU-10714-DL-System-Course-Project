@@ -1,6 +1,8 @@
 import sys, os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+from needle.nn.nn_basic import Module, Identity, Linear, Flatten, ReLU, Sequential, BatchNorm1d, LayerNorm1d, Dropout, Residual, SoftmaxLoss
+from needle.nn.nn_basic import ADD, SUB
 from needle.nn.nn_basic import Module, Identity, Linear, Flatten, ReLU, Sequential, BatchNorm1d, LayerNorm1d, Dropout, BatchNorm2d
 from needle.nn.nn_basic import ADD, SUB
 from needle.nn.nn_conv import Conv, MaxPool2d, AdaptiveAvgPool2d
