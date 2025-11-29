@@ -1,7 +1,8 @@
-import sys
-import torch
 import numpy as np
+import torch
+import torch.nn.functional as F
 import needle as ndl
+from unet import UNet
 from needle import Tensor
 from needle.nn import Sequential
 
@@ -9,7 +10,7 @@ from needle.nn import Sequential
 from torch2needle.torch2needle_converter import torch2needle_fx
 from torch2needle.weight_converter import load_torch_weights_by_mapping
 from operator_fusion.operator_fusion import OperatorFusion
-from torchvision import models
+
 
 def _run_pipeline_test(torch_model, input_shape,device=ndl.cpu(),dtype="fl"):
     """运行完整的 PyTorch → Needle → 权重加载 → 算子融合 流程测试"""
@@ -113,19 +114,15 @@ def _run_pipeline_test(torch_model, input_shape,device=ndl.cpu(),dtype="fl"):
     return True
 
 if __name__ == "__main__":
+    import sys
     all_passed = True
-    device = ndl.cpu() # this is correct, it is ndl.cpu() not ndl.numpy_cpu()\
-    # device = ndl.cuda() 
-
-
-    dtype = "float32"
-    
-    # # 测试 3: ResNet18 模型
-    print("\n\n" + "=" * 80)
-    model = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
-    print("测试 3: ResNet18 模型")
+    device = ndl.cuda()
+    # 示例：测试 UNet 模型
+    print("运行 UNet 模型测试")
     print("=" * 80)
-    all_passed &= _run_pipeline_test(model,(2,3,32,32),device=device,dtype=dtype)
+    torch_unet = UNet(n_channels=3, n_classes=1)
+    input_shape = (1, 3, 572, 572)  # UNet 输入形状
+    all_passed &= _run_pipeline_test(torch_unet, input_shape,device=device,dtype="float32")
     # 总结
     print("\n\n" + "=" * 80)
     if all_passed:
@@ -133,5 +130,5 @@ if __name__ == "__main__":
     else:
         print("❌ 部分测试失败")
     print("=" * 80)
-    
+
     sys.exit(0 if all_passed else 1)

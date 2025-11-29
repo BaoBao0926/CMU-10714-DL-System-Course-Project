@@ -3,7 +3,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from needle.nn.nn_basic import Module, Identity, Linear, Flatten, ReLU, Sequential, BatchNorm1d, LayerNorm1d, Dropout, BatchNorm2d
 from needle.nn.nn_basic import ADD, SUB
-from needle.nn.nn_conv import Conv, MaxPool2d, AdaptiveAvgPool2d
+from needle.nn.nn_conv import Conv, MaxPool2d, AdaptiveAvgPool2d, ConvTranspose2d
 from needle.nn.nn_transformer import MultiHeadAttention, AttentionLayer, TransformerLayer, Transformer
 from needle.nn.nn_sequence import Embedding
 import needle as nd
@@ -71,6 +71,14 @@ def build_executable_model(torch_model, fx_graph, node_to_layer, torch_mapping_n
             super().__init__()
             self.fx_graph = fx_graph
             self.node_to_layer = node_to_layer
+
+            # 计算每个节点的使用次数，当对应节点的use_count变为0，可以释放其占用的内存
+            self._use_count = {}
+            for node in fx_graph.nodes:
+                if node.name not in self._use_count:
+                    self._use_count[node.name] = 0
+                for input_node in node.all_input_nodes:
+                    self._use_count[input_node.name] = self._use_count.get(input_node.name, 0) + 1
             
             # 创建从 layer 到 node_name 的反向映射，用于打印时显示引用
             # 使用 _ 前缀使其在打印时被忽略
@@ -120,23 +128,35 @@ def build_executable_model(torch_model, fx_graph, node_to_layer, torch_mapping_n
             else:
                 # 其他层直接使用其默认表示
                 return repr(layer).replace('\n', '\n' + pad)
+        
+        def _consume(self, env, node_or_name):
+            """用一次后递减该值的 use_count,降到 0 时释放 env 中的值。"""
+            name = node_or_name if isinstance(node_or_name, str) else node_or_name.name
+            if name in self._use_count:
+                self._use_count[name] -= 1
+                if self._use_count[name] == 0 and name in env:
+                    # 删除以释放内存（Tensor/tuple/int 都可释放）
+                    del env[name]
             
         def forward(self, *args):
             # 执行 FX 图
             env = {}
+            placeholders = [node for node in self.fx_graph.nodes if node.op == "placeholder"]
+            for i,n in enumerate(placeholders):
+                #TODO: may out of index if placeholders more than args
+                env[n.name] = args[0] if len(args) == 1 else args[i]
             for node in self.fx_graph.nodes:
                 if node.op == "placeholder":
                     # 输入节点
-                    env[node.name] = args[0] if len(args) == 1 else args[len(env)]
+                    continue
                 elif node.op == "call_module":
                     # 调用模块
                     needle_layer = self.node_to_layer.get(node.name, Identity())
-                    inputs = [env[arg.name] for arg in node.all_input_nodes]
-                    # 处理输入
-                    if inputs and needle_layer:
-                        env[node.name] = needle_layer(inputs[0])
-                    else:
-                        env[node.name] = needle_layer()
+                    input_ = env[node.all_input_nodes[0].name] if node.all_input_nodes else None
+                    env[node.name] = needle_layer(input_) if input_ is not None else needle_layer()
+                    # decrease use_count for inputs
+                    for input_node in node.all_input_nodes:
+                        self._consume(env, input_node)
                 elif node.op == "call_function":
                     # 调用函数 - 直接对张量进行操作
                     # 获取输入张量
@@ -154,10 +174,59 @@ def build_executable_model(torch_model, fx_graph, node_to_layer, torch_mapping_n
                         env[node.name] = inputs[0] * inputs[1]
                     elif node.target == operator.truediv:
                         env[node.name] = inputs[0] / inputs[1]
+                    elif node.target == operator.floordiv:
+                        if isinstance(node.args[1], torch.fx.Node):
+                            env[node.name] = inputs[0] // inputs[1]
+                        else:
+                            env[node.name] = inputs[0] // node.args[1]
+                    elif node.target == operator.getitem:
+                        index = node.args[1]
+                        if isinstance(inputs[0],tuple or list):
+                            env[node.name] = inputs[0][index]
+                        else:
+                            env[node.name] = nd.ops.get_item(inputs[0], index)
+                    elif node.target == torch.nn.functional.pad:
+                        pads = []
+                        for arg in node.args[1]:
+                            if hasattr(arg,'name'):
+                                pads.append(env[arg.name])
+                            else:
+                                pads.append(arg)
+                        env[node.name] = nd.ops.pad(inputs[0],pads, constant_value=0.0)
+                        # decrease use_count for pads inputs
+                        for arg in node.args[1]:
+                            if hasattr(arg,'name'):
+                                self._consume(env, arg)
+                        # consume all input nodes
+                        for input_node in node.all_input_nodes:
+                            self._consume(env, input_node)
+                        continue
+                    elif node.target == torch.cat:
+                        concat_inputs = []
+                        for arg in node.args[0]:
+                            if hasattr(arg,'name'):
+                                concat_inputs.append(env[arg.name])
+                            else:
+                                concat_inputs.append(arg)
+                        axis = node.kwargs['dim']
+                        env[node.name] = nd.ops.concat(concat_inputs, axis)
+                        # decrease use_count for concat inputs
+                        for arg in node.args[0]:
+                            if hasattr(arg,'name'):
+                                self._consume(env, arg)
+                        # consume all input nodes
+                        for input_node in node.all_input_nodes:
+                            self._consume(env, input_node)
+                        continue                            
                     else:
                         # 对于其他函数，尝试调用存储的模块
                         needle_layer = self.node_to_layer.get(node.name, Identity())
                         env[node.name] = needle_layer(inputs[0]) if inputs else needle_layer()
+                    
+                    # decrease use_count for inputs
+                    for arg in node.args:
+                        if isinstance(arg, torch.fx.Node):
+                            self._consume(env, arg)
                 
                 elif node.op == "call_method":
                     # 调用方法 - 例如 tensor.mean(), tensor.size() 等
@@ -182,14 +251,20 @@ def build_executable_model(torch_model, fx_graph, node_to_layer, torch_mapping_n
                                     total *= s
                                 env[node.name] = ops.summation(target_tensor) / total
                         elif method_name == "size":
-                            # size() 方法 - 返回形状信息，在这里我们跳过
-                            env[node.name] = target_tensor
+                            # size() 方法 - 返回形状信息
+                            if len(node.args) == 1:
+                                env[node.name] = target_tensor.shape
+                            else:
+                                dim = node.args[1]
+                                env[node.name] = target_tensor.shape[dim]
                         elif method_name == "unsqueeze":
                             # unsqueeze - 扩展维度
                             env[node.name] = target_tensor
                         else:
                             # 其他方法，直接传递
                             env[node.name] = target_tensor
+                        # decrease use_count for the target tensor
+                        self._consume(env, node.all_input_nodes[0])
                     else:
                         env[node.name] = Identity()
                         
@@ -199,9 +274,17 @@ def build_executable_model(torch_model, fx_graph, node_to_layer, torch_mapping_n
                     while isinstance(real_output, (tuple, list)) and len(real_output) == 1:
                         real_output = real_output[0]
                     if isinstance(real_output, torch.fx.Node):
-                        return env[real_output.name]
+                        out = env[real_output.name]
+                        for input_node in node.all_input_nodes:
+                            self._consume(env, input_node)
+                        return out
                     elif isinstance(real_output, (tuple, list)):
-                        return tuple(env[n.name] for n in real_output)
+                        outs = []
+                        for n in real_output:
+                            outs.append(env[n.name])
+                            for input_node in n.all_input_nodes:
+                                self._consume(env, input_node)
+                        return tuple(outs)
             return None
     
     return FXGraphExecutor(fx_graph, node_to_layer)
@@ -350,6 +433,7 @@ def convert_layer(layer,device,dtype):
                           kernel_size=layer.kernel_size,
                           stride=layer.stride,
                           bias=bias,
+                          padding=layer.padding,
                           device=device,
                           dtype=dtype)
     elif isinstance(layer, nn.MaxPool2d):
@@ -358,7 +442,18 @@ def convert_layer(layer,device,dtype):
                                padding=layer.padding)
     elif isinstance(layer, nn.AdaptiveAvgPool2d):
         return AdaptiveAvgPool2d(output_size=layer.output_size)
-    
+    elif isinstance(layer, nn.ConvTranspose2d):
+        bias = False
+        if layer.bias is not None:
+            bias = True
+        return ConvTranspose2d(in_channels=layer.in_channels,
+                          out_channels=layer.out_channels,
+                          kernel_size=layer.kernel_size,
+                          stride=layer.stride,
+                          padding=layer.padding,
+                          bias=bias,
+                          device=device,
+                          dtype=dtype)
     # Transformer components-may not work too well, since our needle implementation is different from torch implementation
     elif isinstance(layer, nn.MultiheadAttention):
         # PyTorch MultiheadAttention parameters
@@ -553,20 +648,23 @@ def convert_function_node(node, named_modules, node_to_layer, torch_mapping_need
     #                                     depth + 1, parent=node.name, trace_log=trace_log)
     #     module = DIV(left, right)  # 可定义 DIV 模块
     #     note = "operator.truediv"
-
+    elif op in (operator.floordiv,operator.getitem,torch.cat,torch.nn.functional.pad):
+        ## pass through new operator in Unet ##
+        module = Identity()
+        note = "pass through with identity"
     elif op == torch.flatten:
         module = Flatten()
         note = "torch.flatten"
     
-    elif op == operator.getitem:
-        # Handle tuple/list indexing (e.g., for multi-output operations)
-        # Convert the input node first
-        input_node, trace_log = convert_node(node.args[0], named_modules, node_to_layer, torch_mapping_needle,
-                                             depth + 1, parent=node.name, trace_log=trace_log, device=device, dtype=dtype)
-        # For getitem, we just pass through the input module
-        # The actual indexing will be handled at runtime
-        module = Identity()
-        note = "operator.getitem (pass-through)"
+    # elif op == operator.getitem:
+    #     # Handle tuple/list indexing (e.g., for multi-output operations)
+    #     # Convert the input node first
+    #     _, trace_log = convert_node(node.args[0], named_modules, node_to_layer, torch_mapping_needle,
+    #                                          depth + 1, parent=node.name, trace_log=trace_log, device=device, dtype=dtype)
+    #     # For getitem, we just pass through the input module
+    #     # The actual indexing will be handled at runtime
+    #     module = GetItem(node.args[1])
+    #     note = "operator.getitem"
     
     elif op == getattr or (hasattr(__builtins__, 'getattr') and op == __builtins__.getattr):
         # Handle getattr operations (e.g., accessing module attributes)

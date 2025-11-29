@@ -238,6 +238,47 @@ def test_logsumexp(shape, axes, device):
         t_axes = axes
     np.testing.assert_allclose(torch.logsumexp(A_t, dim=t_axes).numpy(), ndl.logsumexp(A, axes=axes).numpy(), atol=1e-5, rtol=1e-5)
 
+#############################################
+### self-defined tests for new nd backend ###
+#############################################
+GETSETITEM_PARAMS = [((3, 2), 1),
+                     ((3, 2), (2, 1)),
+                     ((3, 3, 4), (2, np.s_[2:], np.s_[:3]))]
+@pytest.mark.parametrize("shape, index", GETSETITEM_PARAMS)
+@pytest.mark.parametrize("device", _DEVICES, ids=["cpu", "cuda"])
+def test_getitem(shape, index, device):
+    _A = np.random.randn(*shape).astype(np.float32)
+    A = ndl.Tensor(nd.array(_A), device=device)
+    np.testing.assert_allclose(_A[index], ndl.ops.get_item(A, index).numpy(), atol=1e-5, rtol=1e-5)
+
+PAD_PARAMETERS = [((3, 3), [1,1,1,1], 0.0),
+                    ((4, 4), [2,2,2,2], 1.0),
+                    ((2, 3, 4), [1,1,2,2,0,0], -1.0),
+                    ((3, 2, 5, 4), [1,1,2,1], 2.0)]
+@pytest.mark.parametrize("shape, pads, constant_values", PAD_PARAMETERS)
+@pytest.mark.parametrize("device", _DEVICES, ids=["cpu", "cuda"])
+def test_pad(shape, pads, constant_values, device):
+    _A = np.random.randn(*shape).astype(np.float32)
+    A = ndl.Tensor(nd.array(_A), device=device)
+    np.testing.assert_allclose(
+        torch.nn.functional.pad(torch.tensor(_A), pads, mode='constant', value=constant_values).numpy(),
+        ndl.ops.pad(A, pads=pads, constant_value=constant_values).numpy(),
+        atol=1e-5, rtol=1e-5
+    )
+
+CONCAT_PARAMETERS = [((5, 5), 0, 2),
+                        ((3, 4, 2), 1, 3),
+                        ((2, 1, 5), 2, 4)]
+@pytest.mark.parametrize("shape, axis, l", CONCAT_PARAMETERS)
+@pytest.mark.parametrize("device", _DEVICES, ids=["cpu", "cuda"])
+def test_concat(shape, axis, l, device):
+    _A = [np.random.randn(*shape).astype(np.float32) for i in range(l)]
+    A = [ndl.Tensor(nd.array(_A[i]), device=device) for i in range(l)]
+    A_t = [torch.Tensor(_A[i]) for i in range(l)]
+    out = ndl.concat(A, axis=axis)
+    out_t = torch.cat(A_t, dim=axis)
+    np.testing.assert_allclose(out_t.numpy(), out.numpy(), atol=1e-5, rtol=1e-5)
+                    
 
 
 ### MUGRADE ###

@@ -7,7 +7,7 @@ import torch.nn as nn
 import needle as ndl
 from needle import backend_ndarray as nd
 from needle.nn.nn_basic import Linear, BatchNorm1d, LayerNorm1d, BatchNorm2d, ReLU
-from needle.nn.nn_conv import Conv
+from needle.nn.nn_conv import Conv, ConvTranspose2d
 
 # Try to import optional pooling layers
 try:
@@ -82,6 +82,23 @@ def load_torch_weights_by_mapping(layer_mapping, verbose=True, device=ndl.cpu(),
                     )
                 if verbose: 
                     print(f"[✔] Copied Conv2d({torch_layer.in_channels}, {torch_layer.out_channels}, kernel_size={torch_layer.kernel_size})")
+                copied += 1
+            
+            # ConvTranspose2d
+            elif isinstance(torch_layer, nn.ConvTranspose2d) and isinstance(needle_layer, ConvTranspose2d):
+                # PyTorch: (in_channels, out_channels, kernel_height, kernel_width)
+                # Needle: (kernel_height, kernel_width, out_channels, in_channels)
+                torch_weight = torch_layer.weight.detach().cpu().numpy().astype(np.float32)
+                # 转置: (in_ch, out_ch, kh, kw) -> (kh, kw, cin,cout)
+                needle_weight = np.transpose(torch_weight, (2, 3, 0, 1))
+                needle_layer.weight = ndl.Tensor(needle_weight, device=device, dtype=dtype)
+                if torch_layer.bias is not None:
+                    needle_layer.bias = ndl.Tensor(
+                        torch_layer.bias.detach().cpu().numpy().astype(np.float32),
+                        device=device, dtype=dtype
+                    )
+                if verbose:
+                    print(f"[✔] Copied ConvTranspose2d({torch_layer.in_channels}, {torch_layer.out_channels}, kernel_size={torch_layer.kernel_size})")
                 copied += 1
             
             # === BatchNorm2d ===
