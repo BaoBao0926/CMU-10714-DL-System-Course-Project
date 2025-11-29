@@ -114,18 +114,18 @@ def _run_pipeline_test(torch_model, input_shape,device=ndl.cpu(),dtype="fl"):
 
 if __name__ == "__main__":
     all_passed = True
-    device = ndl.cpu() # this is correct, it is ndl.cpu() not ndl.numpy_cpu()\
-    # device = ndl.cuda() 
+    #device = ndl.cpu() # this is correct, it is ndl.cpu() not ndl.numpy_cpu()\
+    device = ndl.cuda() 
 
 
     dtype = "float32"
     
     # # 测试 3: ResNet18 模型
     print("\n\n" + "=" * 80)
-    model = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
+    model = models.resnet101(models.ResNet101_Weights.DEFAULT)
     print("测试 3: ResNet18 模型")
     print("=" * 80)
-    all_passed &= _run_pipeline_test(model,(2,3,32,32),device=device,dtype=dtype)
+    all_passed &= _run_pipeline_test(model,(1,3,572,572),device=device,dtype=dtype)
     # 总结
     print("\n\n" + "=" * 80)
     if all_passed:
