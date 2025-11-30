@@ -14,7 +14,7 @@ from needle.ops.ops_fused import (
 )
 import needle.init as init
 from needle.nn.nn_basic import (
-    Module, Linear, ReLU, Sequential, BatchNorm1d, BatchNorm2d,
+    Module, Linear, ReLU, Sequential, BatchNorm1d, BatchNorm2d,BatchNorm2d,
     LayerNorm1d, Dropout, Identity, Flatten, Parameter
 )
 from needle.nn.nn_conv import Conv

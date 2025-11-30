@@ -162,7 +162,7 @@ class MaxPool2D(TensorOp):
         H_out = (H +2*P - K) // S +1
         W_out = (W +2*P - K) // S +1
         out = NDArray.make((N,C,H_out,W_out),device=x.device)
-        hip_backend.maxpool2d(x.compact()._handle,out._handle,N,C,H,W,K,K,S,P)
+        hip_backend.maxpool2d(x.compact()._handle,out._handle,N,C,H,W,K,K,S,S,P,P)
         return out
     def gradient(self, out_grad: Tensor, node: Tensor) -> List[Tensor]:
         ### implement MaxPool2D gradient for AMD backend if needed ###

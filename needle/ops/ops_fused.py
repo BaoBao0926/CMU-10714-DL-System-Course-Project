@@ -263,7 +263,6 @@ def fused_linear_batchnorm_relu(
     # Apply ReLU activation
     return relu(out)
 
-
 # mainly in ResNEt
 def fused_conv_batchnorm2d_relu(
     x: Tensor,
