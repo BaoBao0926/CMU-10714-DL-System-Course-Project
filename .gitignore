@@ -3,3 +3,4 @@ data/
 draft.py
 __pycache__/
 !needle/data
+unet_carvana_scale1.0_epoch2.pth

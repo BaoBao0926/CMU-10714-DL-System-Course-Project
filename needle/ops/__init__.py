@@ -18,6 +18,7 @@ def _setup_backend_ops():
                 "conv": ops_hip.conv,
                 "batchnorm2d": ops_hip.batchnorm2d,
                 "conv_batchnorm2d_relu": ops_hip.conv_batchnorm2d_relu,
+                "max_pool2d": ops_hip.max_pool2d,
             })
             print("[Needle] Using HIP-optimized operators")
         except ImportError as e:

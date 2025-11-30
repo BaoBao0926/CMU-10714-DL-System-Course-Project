@@ -1,110 +1,15 @@
-"""
-测试完整流程：PyTorch → Needle 转换 → 权重加载 → 算子融合
-"""
 import sys
-import os
-sys.path.append(os.path.dirname(__file__))
-os.environ["NEEDLE_BACKEND"] = "hip"
 import torch
-import torch.nn as nn
 import numpy as np
 import needle as ndl
 from needle import Tensor
-from needle.nn import Sequential, Linear, ReLU, BatchNorm1d
+from needle.nn import Sequential
 
 # 导入转换和融合工具
 from torch2needle.torch2needle_converter import torch2needle_fx
 from torch2needle.weight_converter import load_torch_weights_by_mapping
 from operator_fusion.operator_fusion import OperatorFusion
-
 from torchvision import models
-
-# 创建一个简单的 PyTorch 模型（Sequential，适合融合）
-class SimpleTorchModel(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.features = nn.Sequential(
-            nn.Linear(10, 20),
-            nn.ReLU(),
-            nn.Linear(20, 30),
-            nn.BatchNorm1d(30),
-            nn.ReLU(),
-            nn.Linear(30, 10),
-        )
-        self.features2 = nn.Sequential(
-            nn.Linear(10, 20),
-            nn.ReLU(),
-            nn.Linear(20, 30),
-            nn.BatchNorm1d(30),
-            nn.ReLU(),
-            nn.Linear(30, 10),
-        )
-        
-    def forward(self, x):
-        return self.features(x) + self.features2(x)
-
-
-# ResNet 基础块
-class ResidualBlock(nn.Module):
-    """ResNet 基础残差块"""
-    def __init__(self, in_features, hidden_features, out_features):
-        super().__init__()
-        self.linear1 = nn.Linear(in_features, hidden_features)
-        self.bn1 = nn.BatchNorm1d(hidden_features)
-        self.relu1 = nn.ReLU()
-        self.linear2 = nn.Linear(hidden_features, out_features)
-        self.bn2 = nn.BatchNorm1d(out_features)
-        self.relu2 = nn.ReLU()
-        
-        # shortcut: 如果输入输出维度不同，需要投影
-        if in_features != out_features:
-            self.shortcut = nn.Linear(in_features, out_features)
-        else:
-            self.shortcut = nn.Identity()
-    
-    def forward(self, x):
-        identity = self.shortcut(x)
-        
-        out = self.linear1(x)
-        out = self.bn1(out)
-        out = self.relu1(out)
-        
-        out = self.linear2(out)
-        out = self.bn2(out)
-        
-        out = out + identity  # 残差连接
-        out = self.relu2(out)
-        
-        return out
-
-
-# 完整的 ResNet 模型
-class ResNetModel(nn.Module):
-    """简化版 ResNet，用于测试"""
-    def __init__(self, input_dim=784, num_classes=10):
-        super().__init__()
-        
-        # 初始层
-        self.stem = nn.Sequential(
-            nn.Linear(input_dim, 128),
-            nn.BatchNorm1d(128),
-            nn.ReLU()
-        )
-        
-        # 残差块
-        self.layer1 = ResidualBlock(128, 128, 128)
-        self.layer2 = ResidualBlock(128, 256, 256)
-        
-        # 分类头
-        self.fc = nn.Linear(256, num_classes)
-    
-    def forward(self, x):
-        x = self.stem(x)
-        x = self.layer1(x)
-        x = self.layer2(x)
-        x = self.fc(x)
-        return x
-
 
 def _run_pipeline_test(torch_model, input_shape,device=ndl.cpu(),dtype="fl"):
     """运行完整的 PyTorch → Needle → 权重加载 → 算子融合 流程测试"""
@@ -147,7 +52,7 @@ def _run_pipeline_test(torch_model, input_shape,device=ndl.cpu(),dtype="fl"):
     max_diff_before = np.max(diff_before)
     print(f"转换后最大误差: {max_diff_before:.2e}")
     
-    if max_diff_before < 1e-4:
+    if max_diff_before < 1e-5:
         print("✅ 转换正确！")
     else:
         print("❌ 转换有误差！")
@@ -184,7 +89,7 @@ def _run_pipeline_test(torch_model, input_shape,device=ndl.cpu(),dtype="fl"):
     max_diff_after = np.max(diff_after)
     print(f"融合后最大误差: {max_diff_after:.2e}")
     
-    if max_diff_after < 1e-4:
+    if max_diff_after < 1e-5:
         print("✅ 融合正确！")
     else:
         print("❌ 融合后有误差！")
@@ -207,30 +112,17 @@ def _run_pipeline_test(torch_model, input_shape,device=ndl.cpu(),dtype="fl"):
     
     return True
 
-
 if __name__ == "__main__":
     all_passed = True
-    #device = ndl.cpu() # this is correct, it is ndl.cpu() not ndl.numpy_cpu()
-    device = ndl.hip()
+    device = ndl.cpu() # this is correct, it is ndl.cpu() not ndl.numpy_cpu()\
+    # device = ndl.cuda() 
+
+
     dtype = "float32"
     
-    # # # 测试 1: 简单双分支模型
-    # print("\n" + "=" * 80)
-    # print("测试 1: 简单双分支模型")
-    # print("=" * 80)
-    # model = SimpleTorchModel()
-    # all_passed &= _run_pipeline_test(model,(5, 10),device,dtype)
-    
-    # # # 测试 2: ResNet 模型
-    # print("\n\n" + "=" * 80)
-    # model = ResNetModel(input_dim=32, num_classes=10)
-    # print("测试 2: ResNet 模型（包含残差连接）")
-    # print("=" * 80)
-    # all_passed &= _run_pipeline_test(model,(5,32),device=device,dtype=dtype)
-
     # # 测试 3: ResNet18 模型
     print("\n\n" + "=" * 80)
-    model = models.resnet101(weights=models.ResNet101_Weights.DEFAULT)
+    model = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
     print("测试 3: ResNet18 模型")
     print("=" * 80)
     all_passed &= _run_pipeline_test(model,(2,3,32,32),device=device,dtype=dtype)
