@@ -275,7 +275,7 @@ if __name__ == "__main__":
     file_path = "performance_summary_unet.txt"
     torch_model = UNet(n_channels=3, n_classes=2, bilinear=False)
     torch_model_device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    state_dict = torch.load("unet_carvana_scale1.0_epoch2.pth", map_location=torch_model_device)
+    state_dict = torch.load("apps/Unet/unet_carvana_scale1.0_epoch2.pth", map_location=torch_model_device)
     mask_values = state_dict.pop('mask_values', [0, 1])
     torch_model.load_state_dict(state_dict)
 

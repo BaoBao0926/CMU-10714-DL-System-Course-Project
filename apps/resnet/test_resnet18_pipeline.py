@@ -42,7 +42,7 @@ def convert_resnet18_to_needle(torch_model, device, dtype):
     fusion_engine = OperatorFusion()
     fused_model = fusion_engine.fuse_model(needle_model)
     fused_model.eval()
-    return needle_model
+    return fused_model
 
 
 # ------------------------------------------------------
