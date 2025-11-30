@@ -33,12 +33,12 @@ from typing import Any, List, Tuple, Optional
 try:
     from fusion_pattrern import (
         FusionPattern, LinearReLUPattern, LinearBatchNormPattern, BatchNormReLUPattern, 
-        LinearBatchNormReLUPattern, ConvBatchNorm2dReLUPattern
+        LinearBatchNormReLUPattern, ConvBatchNorm2dReLUPattern,ConvBatchNorm2dPattern
     )
 except ImportError:
     from operator_fusion.fusion_pattrern import (
         FusionPattern, LinearReLUPattern, LinearBatchNormPattern, BatchNormReLUPattern, 
-        LinearBatchNormReLUPattern, ConvBatchNorm2dReLUPattern
+        LinearBatchNormReLUPattern, ConvBatchNorm2dReLUPattern, ConvBatchNorm2dPattern
     )
 
 # ============================================================================
@@ -60,6 +60,7 @@ class OperatorFusion:
         if patterns is None:
             self.patterns = patterns = [
                 ConvBatchNorm2dReLUPattern(),  # Conv+BN+ReLU (ResNet pattern)
+                ConvBatchNorm2dPattern(),      # Conv+BN
                 LinearBatchNormReLUPattern(),  # Linear+BN+ReLU
                 LinearBatchNormPattern(),      # Linear+BN
                 LinearReLUPattern(),           # Linear+ReLU
