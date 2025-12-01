@@ -38,17 +38,28 @@ source /your-path-to-project/.venv/bin/activate
 # you will see the environment in command line in:
 (10714-hw4) Username@Host:your-path-to-project/
 ```
+Our project maintains 3 branches that provides different features. Branch `main` is a test version for torch2needle only. The other two branch requires you to have an **AMD GPU** with **ROCm version >=7.1.0**. Please verify that before you run.
 
-After you build the environment, please set global variable to(, which is optional):
+Branch `shuaiweh` add AMD GPU backend implementation library that enable the code to run on AMD GPU. Branch `profiling` adds profiling features on `shuaiweh`'s code to verify the performance of our implementation (such as inference time comparison).
+
+If you have no AMD GPU, after the environment is built, you should set global variable to:
 ```bash
 %set_env PYTHONPATH ./needle
 %set_env NEEDLE_BACKEND nd
 ```
+which will call operator defined on cpu or cuda.
 To build the project, use the following commands in your terminal(especially you first clone this repo):
 ```bash
 make reset
 make
 ```
+
+If you have an AMD GPU, after the environment is built, you should set global variable to:
+```bash
+%set_env PYTHONPATH ./needle
+%set_env NEEDLE_BACKEND hip
+```
+which will call operators defined on AMD GPU.
 
 To test if your environment is run correctly, you can run pytest command in hw4.ipynb for verification, for example:
 ```bash
@@ -96,7 +107,7 @@ operator_fusion/
 └── fused_layer.py       # define the fused layer
 
 needle/ops
-└── ops_fused.py         # defien the fused ops, which should be replaced into C++
+└── ops_fused.py         # define the fused ops, which should be replaced into C++
 
 ```
 
@@ -111,16 +122,23 @@ If you want to add one more fused operator, you should add:
 - (4) operator_fusion/operator_fusion.py
   - in starter function fuse_operator(), add new fused operator into `patterns = []`
 
-**TODO**:
-  - @shuaiwei, write C++ code for each fusd operator in needle/ops/ops_fused.py
+If you have an AMD GPU and you have already set `NEEDLE_BACKEND` to `hip`, fused ops in ops_fused.py will automatically direct you to `ops_hip.py` that provides interface with AMD GPU backend. 
  
 ## Optimization on AMD GPU
 
-Here includes anything you'd love to know about running torch2needle at AMD GPU! Once you have a `.cu` file, you are free to deploy your backend implementation to AMD GPUs! 
+This AMD GPUs backend implementation is verified on AMD MI300X GPU, with **ROCm == 7.1.0** on **Ubuntu 24.04 LTS** system.
 
-This AMD GPUs implementation is verified at **Ubuntu 24.04 LTS** image.
+You can check the implementation at:
+```text
 
-Before compile, please make sure your system has `rocm` and `hipify-clang`, you can download them via [AMD ROCm introduction documentation](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/install/quick-start.html)
+needle/ops
+└── ops_hip.py         # define AMD GPU (HIP) operator python interface
+
+src
+└── ndarray_backend_hip.cpp  # define specific implementation of AMD GPU (HIP) operators
+```
+
+Our implementation also provides a script to transfer cuda code to AMD GPU portable code (hip code). Before using this, please make sure your system has  `hipify-clang`, you can download them via [AMD ROCm introduction documentation](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/install/quick-start.html). Also, make sure your cuda code file is in `./src` directory.
 
 Once you've checked your rocm and hipify-clang, please specify your `cuda-path` in `hipify-script.sh`, then, run `hipify-script.sh` in this command:
 
@@ -128,11 +146,8 @@ Once you've checked your rocm and hipify-clang, please specify your `cuda-path` 
 sh hipify-script.sh
 ```
 
-if success, you'll find a hip version of your cuda code is generated in `src` directory! 
+if success, you'll find a hip version of your cuda code is generated in `src` directory. All you need to do is run `make` and make & cmake will compile everything for you！
 
-All you need to do is run `make` and make & cmake will compile everything for you！
+## Profile our implementation
 
-
-**TODO**:
-  - @shuaiwei, good luck to you
-
+You are free to run `profile_full_pipeline_resnet.py` and `profile_full_pipelilne_unet.py` to profile our implementation after switch to `profiling` branch. Previous profile reports for these two models are also provided.
