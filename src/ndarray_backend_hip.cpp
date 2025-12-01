@@ -1151,15 +1151,15 @@ void MaxPool2D(const HipArray& input, HipArray* output,
     int output_w = (input_w + 2 * pad_w - kernel_w) / stride_w + 1;
 
     dim3 blockDim(16, 16);
-    dim3 gridDim((output_w + blockSize.x - 1) / blockSize.x,
-                  (output_h + blockSize.y - 1) / blockSize.y,
+    dim3 gridDim((output_w + blockDim.x - 1) / blockDim.x,
+                  (output_h + blockDim.y - 1) / blockDim.y,
                   batch_size * channels);
 
-    size_t shared_mem_size = ((blockSize.x -1) * stride_w + kernel_w) *
-                             ((blockSize.y -1) * stride_h + kernel_h) *
+    size_t shared_mem_size = ((blockDim.x -1) * stride_w + kernel_w) *
+                             ((blockDim.y -1) * stride_h + kernel_h) *
                              sizeof(scalar_t);
 
-    max_pool2d<<<gridSize, blockSize, shared_mem_size>>>(input.ptr, output->ptr,
+    max_pool2d<<<gridDim, blockDim, shared_mem_size>>>(input.ptr, output->ptr,
                                                           batch_size, channels,
                                                           input_h, input_w,
                                                           output_h, output_w,
@@ -1167,7 +1167,7 @@ void MaxPool2D(const HipArray& input, HipArray* output,
                                                           stride_h, stride_w,
                                                           pad_h, pad_w);
     hipDeviceSynchronize();
-
+    }
 
 }  // namespace hip
 }  // namespace needle

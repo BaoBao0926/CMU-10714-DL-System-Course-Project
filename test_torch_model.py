@@ -193,24 +193,4 @@ class SimpleLSTMModel(nn.Module):
         last = out[:, -1, :]
         return self.fc(last)
 
-
-class SimpleTransformerModel(nn.Module):
-    """基于 nn.TransformerEncoder 的简单 Transformer 分类器。
-       期望输入 (batch, seq_len, d_model)。"""
-    def __init__(self, d_model=32, nhead=4, num_layers=2, dim_feedforward=128, num_classes=10):
-        super().__init__()
-        encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead,
-                                                   dim_feedforward=dim_feedforward,
-                                                   batch_first=True)
-        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
-        # 如果输入维度不是 d_model，用户可在外部先用线性投影
-        self.fc = nn.Linear(d_model, num_classes)
-
-    def forward(self, x):
-        # x: (B, T, D)
-        # TransformerEncoderLayer with batch_first=True accepts (B, T, D)
-        out = self.encoder(x)        # (B, T, D)
-        out = out.mean(dim=1)     # 平均池化
-        return self.fc(out)
-
 # ...existing code...

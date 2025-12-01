@@ -1,5 +1,7 @@
 import sys
 sys.path.append('./python')
+import os
+os.environ["NEEDLE_BACKEND"] = "hip"
 import numpy as np
 import pytest
 from needle import backend_ndarray as nd
@@ -337,22 +339,25 @@ def test_stack_vs_pytorch():
 
 
 
+
 conv_forward_params = [
-    (4, 8, 16, 3, 1),
-    (32, 8, 16, 3, 2),
-    (32, 8, 8, 3, 2),
-    (32, 16, 8, 3, 1),
-    (32, 16, 8, 3, 2)
+    (4, 1, 1, 3, 1,0),
+    (14, 8, 16, 3, 1,1),
+    (14, 8, 16, 3, 2,1),
+    (14, 8, 8, 3, 1,0),
+    (14, 8, 8, 3, 2,2),
+    (14, 16, 8, 3, 1,0),
+    (14, 16, 8, 3, 2,1),
 ]
-@pytest.mark.parametrize("s,cin,cout,k,stride", conv_forward_params)
+@pytest.mark.parametrize("s,cin,cout,k,stride,padding", conv_forward_params)
 @pytest.mark.parametrize("device", _DEVICES)
-def test_nn_conv_forward(s, cin, cout, k, stride, device):
+def test_nn_conv_forward(s, cin, cout, k, stride, padding,device):
     np.random.seed(0)
     import torch
-    f = ndl.nn.Conv(cin, cout, k, stride=stride, device=device)
+    f = ndl.nn.Conv(cin, cout, k, stride=stride,padding=padding, device=device)
     x = ndl.init.rand(10, cin, s, s, device=device)
 
-    g = torch.nn.Conv2d(cin, cout, k, stride=stride, padding=k//2)
+    g = torch.nn.Conv2d(cin, cout, k, stride=stride, padding=padding)
     g.weight.data = torch.tensor(f.weight.cached_data.numpy().transpose(3, 2, 0, 1))
     g.bias.data = torch.tensor(f.bias.cached_data.numpy())
     z = torch.tensor(x.cached_data.numpy())
@@ -742,6 +747,31 @@ def test_nn_adaptiveaveragepool2d_forward(X_shape, output_size, device):
     out = g(Xtch)
 
     assert np.linalg.norm(y.cached_data.numpy() - out.detach().numpy()) < 1e-3
+
+
+conv_transpose_params = [
+    (4, 2, 1, 3, 1,0),
+    (14, 8, 16, 3, 1,1),
+    (14, 8, 16, 3, 2,1),
+    (14, 8, 8, 3, 1,0),
+    (14, 8, 8, 3, 2,2),
+    (14, 16, 8, 3, 1,0),
+    (14, 16, 8, 3, 2,1),
+]
+@pytest.mark.parametrize("s,cin,cout,k,stride,padding", conv_transpose_params)
+@pytest.mark.parametrize("device", _DEVICES)
+def test_nn_conv_transpose2d_forward(s, cin, cout, k, stride, padding,device):
+    np.random.seed(0)
+    import torch
+    f = ndl.nn.ConvTranspose2d(cin, cout, k, stride=stride,padding=padding, device=device)
+    x = ndl.init.rand(10, cin, s, s, device=device)
+
+    g = torch.nn.ConvTranspose2d(cin, cout, k, stride=stride, padding=padding)
+    g.weight.data = torch.tensor(f.weight.cached_data.numpy().transpose(2, 3, 0, 1))
+    g.bias.data = torch.tensor(f.bias.cached_data.numpy())
+    z = torch.tensor(x.cached_data.numpy())
+
+    assert np.linalg.norm(f(x).cached_data.numpy() - g(z).data.numpy()) < 1e-3
 
 ######################    |    ######################
 ###################### MUGRADE ######################

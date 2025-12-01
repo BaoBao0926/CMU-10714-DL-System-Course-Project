@@ -732,6 +732,8 @@ def exp(a: NDArray) -> NDArray:
 def tanh(a: NDArray) -> NDArray:
     return a.tanh()
 
+def sqrt(a: NDArray) -> NDArray:
+    return a ** 0.5 # use ewise-pow
 
 def sum(a: NDArray, axis: int | tuple[int] | list[int] | None = None, keepdims: bool = False) -> NDArray:
     return a.sum(axis=axis, keepdims=keepdims)
