@@ -68,6 +68,14 @@ def cuda() -> BackendDevice:
     except ImportError:
         return BackendDevice("cuda", None)
 
+def hip() -> BackendDevice:
+    """Return hip device"""
+    try:
+        from . import ndarray_backend_hip  # type: ignore[attr-defined]
+
+        return BackendDevice("hip", ndarray_backend_hip)
+    except ImportError:
+        return BackendDevice("hip", None)
 
 def cpu_numpy() -> BackendDevice:
     """Return numpy device"""
@@ -724,6 +732,8 @@ def exp(a: NDArray) -> NDArray:
 def tanh(a: NDArray) -> NDArray:
     return a.tanh()
 
+def sqrt(a: NDArray) -> NDArray:
+    return a ** 0.5 # use ewise-pow
 
 def sum(a: NDArray, axis: int | tuple[int] | list[int] | None = None, keepdims: bool = False) -> NDArray:
     return a.sum(axis=axis, keepdims=keepdims)

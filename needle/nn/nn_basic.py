@@ -5,6 +5,7 @@ from needle.autograd import Tensor
 from needle import ops
 import needle.init as init
 import numpy as np
+from ..backend_ndarray import hip
 
 from needle.needle_profiling import profile_operation
 
@@ -121,6 +122,12 @@ class ReLU(Module):
         return ops.relu(x)
         ### END YOUR SOLUTION
 
+class GELU(Module):
+    def forward(self, x: Tensor) -> Tensor:
+        ### BEGIN YOUR SOLUTION
+        return ops.gelu(x)
+        ### END YOUR SOLUTION
+
 class Sequential(Module):
     def __init__(self, *modules: Module) -> None:
         super().__init__()
@@ -212,6 +219,8 @@ class BatchNorm2d(BatchNorm1d):
     @profile_operation
     def forward(self, x: Tensor):
         # nchw -> nhcw -> nhwc
+        if x.device == hip() and self.training==False:
+            return ops.batchnorm2d(x, self.dim, self.weight, self.bias, self.running_mean, self.running_var, self.eps, self.momentum)
         s = x.shape
         _x = x.transpose((1, 2)).transpose((2, 3)).reshape((s[0] * s[2] * s[3], s[1]))
         y = super().forward(_x).reshape((s[0], s[2], s[3], s[1]))
@@ -286,3 +295,50 @@ class SUB(Module):
     @profile_operation
     def forward(self, x: Tensor) -> Tensor:
         return self.left(x) - self.right(x)
+
+# class GetItem(Module):
+#     def __init__(self, index):
+#         super().__init__()
+#         self.index = index
+
+#     def forward(self, x: Tensor) -> Tensor:
+#         return ops.get_item(x, self.index)
+
+# class FloorDiv(Module):
+#     def __init__(self, left, right):
+#         super().__init__()
+#         self.left = left
+#         self.right = right
+
+#     def forward(self, x: Tensor) -> Tensor:
+#         if isinstance(self.right, Module):
+#             return self.left(x) // self.right(x)
+#         else:
+#             # python integer or 0-D tensor
+#             r = self.right
+#             if isinstance(r, Tensor) and r.shape == ():
+#                 r = r.item()
+#             return self.left(x) // r
+
+
+# class Pad(Module):
+#     def __init__(self, pad:Optional[List[int]], constant_values=0.0):
+#         super().__init__()
+#         assert len(pad) % 2 ==0, "pad_width should contains even number of values"
+#         self.pad = pad
+#         self.constant_values = constant_values
+
+#     def forward(self, x: Tensor) -> Tensor:
+#         pad_size = len(x.shape) - len(self.pad)//2
+#         axes = ((0,0),) * pad_size
+#         for i in range(len(self.pad)//2):
+#             axes = axes + ((self.pad[2*i],self.pad[2*i+1]),)
+#         return ops.pad(x, axes, constant_values=self.constant_values)
+    
+# class Concat(Module):
+#     def __init__(self, axis: int):
+#         super().__init__()
+#         self.axis = axis
+#     def forward(self, x_list: List[Tensor]) -> Tensor:
+#         return ops.concat(x_list, self.axis)
+        

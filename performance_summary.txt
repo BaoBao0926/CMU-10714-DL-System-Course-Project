@@ -2,24 +2,18 @@
 --------------------------------------------------------------------------------
 ADDITIONAL PERFORMANCE DATA
 --------------------------------------------------------------------------------
-BatchNorm2d.forward..................... calls:   2200 | avg:    0.724ms | total:   1593.862ms
-Conv.forward............................ calls:   2200 | avg:    0.500ms | total:   1100.543ms
-ReLU.forward............................ calls:   1870 | avg:    0.104ms | total:    194.310ms
-MaxPool2d.forward....................... calls:    110 | avg:    1.431ms | total:    157.395ms
-Linear.forward.......................... calls:    110 | avg:    0.242ms | total:     26.651ms
-AdaptiveAvgPool2d.forward............... calls:    110 | avg:    0.114ms | total:     12.488ms
-Flatten.forward......................... calls:    110 | avg:    0.011ms | total:      1.226ms
+Conv.forward............................ calls:   2109 | avg:    6.456ms | total:  13615.581ms
+BatchNorm2d.forward..................... calls:   1998 | avg:    6.806ms | total:  13599.280ms
+ConvTranspose2d.forward................. calls:    444 | avg:   11.374ms | total:   5049.950ms
+ReLU.forward............................ calls:   1998 | avg:    0.070ms | total:    140.169ms
+MaxPool2d.forward....................... calls:    444 | avg:    0.119ms | total:     52.824ms
 ================================================================================
 ================================================================================
 PERFORMANCE SUMMARY (sorted by total execution time)
 ================================================================================
-Tensor.fused_conv_batchnorm2d_relu...... calls:    990 | avg:    2.453ms | total:   2428.513ms
-Conv.forward............................ calls:   1210 | avg:    1.116ms | total:   1350.462ms
-BatchNorm2d.forward..................... calls:   1210 | avg:    0.600ms | total:    726.231ms
-MaxPool2d.forward....................... calls:    110 | avg:    1.488ms | total:    163.683ms
-ReLU.forward............................ calls:    880 | avg:    0.070ms | total:     61.347ms
-AdaptiveAvgPool2d.forward............... calls:    110 | avg:    0.499ms | total:     54.909ms
-Linear.forward.......................... calls:    110 | avg:    0.240ms | total:     26.397ms
-Flatten.forward......................... calls:    110 | avg:    0.015ms | total:      1.630ms
-Identity.forward........................ calls:   1980 | avg:    0.000ms | total:      0.492ms
+Tensor.fused_conv_batchnorm2d_relu...... calls:   1998 | avg:    7.400ms | total:  14784.539ms
+ConvTranspose2d.forward................. calls:    444 | avg:   12.842ms | total:   5701.721ms
+Conv.forward............................ calls:    111 | avg:    6.715ms | total:    745.411ms
+MaxPool2d.forward....................... calls:    444 | avg:    0.143ms | total:     63.277ms
+Identity.forward........................ calls:   3996 | avg:    0.000ms | total:      1.234ms
 ================================================================================

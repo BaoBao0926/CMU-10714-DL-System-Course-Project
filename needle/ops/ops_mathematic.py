@@ -6,7 +6,7 @@ from typing import Optional, List, Tuple, Union
 from ..autograd import NDArray
 from ..autograd import Op, Tensor, Value, TensorOp
 from ..autograd import TensorTuple, TensorTupleOp
-import numpy
+import math
 
 # NOTE: we will import numpy as the array_api
 # as the backend for our computations, this line will change in later homeworks
@@ -736,4 +736,195 @@ class AdaptiveAvgPool2d(TensorOp):
 def adaptive_avg_pool2d(x,output_size=(1,1)):
     return AdaptiveAvgPool2d(output_size=output_size)(x)
 
+class GELU(TensorOp):
+    def compute(self, a):
+        ### BEGIN YOUR SOLUTION
+        return 0.5 * a * (1 + array_api.tanh(array_api.sqrt(2 / math.pi) * (a + 0.044715 * (a ** 3))))
+        ### END YOUR SOLUTION
 
+    def gradient(self, out_grad, node):
+        ### BEGIN YOUR SOLUTION
+        x = node.inputs[0]
+        tanh_out = array_api.tanh(array_api.sqrt(2 / math.pi) * (x.cached_data + 0.044715 * (x.cached_data ** 3)))
+        sech2 = 1 - tanh_out ** 2
+        coeff = array_api.sqrt(2 / math.pi) * (1 + 3 * 0.044715 * (x.cached_data ** 2))
+        gelu_grad = 0.5 * (1 + tanh_out) + 0.5 * x.cached_data * sech2 * coeff
+        return out_grad * Tensor(gelu_grad,device=out_grad.device)
+        ### END YOUR SOLUTION
+
+def gelu(a):
+    return GELU()(a)
+
+class SliceOp(TensorOp):
+    def __init__(self, slices:Optional[list[tuple]]=None):
+        self.slices = slices
+
+    def compute(self, a):
+        ### BEGIN YOUR SOLUTION
+        slices = [slice(None)] * len(a.shape)
+        for i, (start, end, step) in enumerate(self.slices):
+            slices[i] = slice(start, end,step)
+        return a[tuple(slices)]
+        ### END YOUR SOLUTION
+
+    def gradient(self, out_grad, node):
+        ### BEGIN YOUR SOLUTION
+        # implement gradient for slice operation if needed
+        raise NotImplementedError()
+        ### END YOUR SOLUTION
+
+def tensor_slice(a, slices):
+    return SliceOp(slices)(a)
+
+class Pad(TensorOp):
+    def __init__(self, pads: Optional[List[Tuple[int]]] = None, constant_value: float = 0.0):
+        assert len(pads) % 2 ==0, "pad_width should contains even number of values"
+        self.pad = pads
+        self.constant_value = constant_value
+
+    def compute(self, a):
+        ### BEGIN YOUR SOLUTION
+        pad_size = len(self.pad)
+        zero_pad_size = len(a.shape) - len(self.pad)//2
+        axes = ((0,0),) * zero_pad_size
+        for i in range(len(self.pad)//2):
+            axes = axes + ((self.pad[pad_size - 2 - 2*i], self.pad[pad_size - 1 - 2*i]),)
+        return a.pad(axes, constant_value=self.constant_value)
+        ### END YOUR SOLUTION
+
+    def gradient(self, out_grad, node):
+        ### BEGIN YOUR SOLUTION
+        ## implement gradient for pad operation if needed
+        raise NotImplementedError()
+        ### END YOUR SOLUTION
+
+def pad(a, pads=None, constant_value=0.0):
+    return Pad(pads, constant_value)(a)
+
+class GetItem(TensorOp):
+    def __init__(self, idx):
+        self.idx = idx
+
+    def compute(self, a):
+        ### BEGIN YOUR SOLUTION
+        if not isinstance(self.idx, tuple):
+            idxs = (self.idx,)
+        if len(idxs) < len(a.shape):
+            idxs = idxs + (slice(None),) * (len(a.shape) - len(idxs))
+        return a[idxs]
+        ### END YOUR SOLUTION
+
+    def gradient(self, out_grad, node):
+        ### BEGIN YOUR SOLUTION
+        ## implement gradient for getitem operation if needed
+        raise NotImplementedError()
+        ### END YOUR SOLUTION
+def get_item(a, idx):
+    return GetItem(idx)(a)
+
+class Concat(TensorOp):
+    def __init__(self, axis: int):
+        self.axis = axis
+
+    def compute(self, args: TensorTuple) -> Tensor:
+        ### BEGIN YOUR SOLUTION
+        tupleLen = len(args)
+        new_shape = args[0].shape[:self.axis] + (args[0].shape[self.axis]*tupleLen,) + args[0].shape[self.axis+1:]
+        
+        new_array = array_api.empty(shape=new_shape,device=args[0].device) # should be the same device as args[0]!
+        for i in range(tupleLen):
+            new_slice = [slice(None)] * len(new_shape)
+            new_slice[self.axis] = slice(i*args[0].shape[self.axis],(i+1)*args[0].shape[self.axis])
+            new_array[tuple(new_slice)] = args[i]
+        return new_array
+        ### END YOUR SOLUTION
+
+    def gradient(self, out_grad, node):
+        ### BEGIN YOUR SOLUTION
+        raise NotImplementedError()
+        ### END YOUR SOLUTION
+
+def concat(args, axis):
+    return Concat(axis)(make_tuple(*args))
+
+class MaxPool2d(TensorOp):
+    def __init__(self,kernel_size:Optional[int] = 3,stride: Optional[int] = 1, padding: Optional[int] = 0):
+        self.kernel_size = kernel_size
+        self.stride = stride
+        self.padding = padding
+    
+    def compute(self, x):
+        batch_size, channels, in_height, in_width = x.shape
+        pad = self.padding
+        kernel_size = self.kernel_size
+        stride = self.stride
+        # add padding
+        if self.padding > 0:
+            x = x.pad(((0, 0), (0, 0), (pad, pad), (pad, pad)), constant_value=float('-inf'))
+        else:
+            x = x
+        # compute output height and width, then create new view of ndarray
+        # The same logic as Conv op
+        out_height = (in_height + 2 * pad - kernel_size) // stride + 1
+        out_width = (in_width + 2 * pad - kernel_size) // stride + 1
+        shape_6d = (batch_size, channels, out_height, out_width, kernel_size, kernel_size)
+        strides_6d = (
+            x.strides[0],  # batch
+            x.strides[1],  # channel  
+            stride * x.strides[2],  # height
+            stride * x.strides[3],  # width
+            x.strides[2],  # kernel height
+            x.strides[3]   # kernel width
+        )
+        
+        windows_6d = x.as_strided( 
+            shape=shape_6d, 
+            strides=strides_6d
+        )
+        
+        windows_5d = windows_6d.compact().reshape((batch_size, channels, out_height, out_width, kernel_size * kernel_size))
+        # find the maximum value of the last axis
+        output = windows_5d.max(axis=len(windows_5d.shape) - 1)
+        
+        return output
+    def gradient(self, out_grad, node):
+        ## if needed, implement backward of maxpool
+        raise NotImplementedError()
+    
+def max_pool2d(x,kernel_size=3,stride=1,padding=0):
+    return MaxPool2d(kernel_size,stride,padding)(x)
+
+class AdaptiveAvgPool2d(TensorOp):
+    def __init__(self,output_size:Optional[Tuple]=(1,1)):
+        self.output_size = output_size
+    def compute(self, x):
+        batch_size, channels, in_height, in_width = x.shape
+        out_height, out_width = self.output_size
+        assert (in_height % out_height == 0) and (in_width % out_width == 0),"cannot apply since input size cannot be divided evenly by output size"
+
+        # 计算池化核大小
+        kernel_h = in_height // out_height
+        kernel_w = in_width // out_width
+        
+        # 重塑张量并计算平均值
+        new_shape = (batch_size,channels,out_height,kernel_h,out_width,kernel_w)
+        new_strides = (
+            x.strides[0],
+            x.strides[1],
+            kernel_h * x.strides[2],
+            x.strides[2],
+            kernel_w * x.strides[3],
+            x.strides[3]
+        )
+
+        window_6d = x.as_strided(new_shape,new_strides)
+        window_6d = window_6d.compact().permute((0,1,2,4,3,5))
+        window_5d = window_6d.compact().reshape((batch_size, channels, out_height, out_width, kernel_h*kernel_w))
+        output = array_api.mean(window_5d, axis=len(window_5d.shape)-1)
+        return output
+    def gradient(self, out_grad, node):
+        ## if needed, implement backward of AdaptiveAveragepool2d
+        raise NotImplementedError()
+
+def adaptive_avg_pool2d(x,output_size=(1,1)):
+    return AdaptiveAvgPool2d(output_size=output_size)(x)

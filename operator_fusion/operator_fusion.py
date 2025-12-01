@@ -15,13 +15,6 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from needle.autograd import Tensor
 from needle.ops.ops_mathematic import relu, matmul, broadcast_to, summation, reshape
-from needle.ops.ops_fused import (
-    fused_linear_relu,
-    fused_batchnorm_relu,
-    fused_linear_batchnorm,
-    fused_linear_batchnorm_relu,
-    fused_conv_batchnorm2d_relu,
-)
 import needle.init as init
 from needle.nn.nn_basic import (
     Module, Linear, ReLU, Sequential, BatchNorm1d, BatchNorm2d,
@@ -33,12 +26,12 @@ from typing import Any, List, Tuple, Optional
 try:
     from fusion_pattrern import (
         FusionPattern, LinearReLUPattern, LinearBatchNormPattern, BatchNormReLUPattern, 
-        LinearBatchNormReLUPattern, ConvBatchNorm2dReLUPattern
+        LinearBatchNormReLUPattern, ConvBatchNorm2dReLUPattern, ConvBatchNorm2dPattern
     )
 except ImportError:
     from operator_fusion.fusion_pattrern import (
         FusionPattern, LinearReLUPattern, LinearBatchNormPattern, BatchNormReLUPattern, 
-        LinearBatchNormReLUPattern, ConvBatchNorm2dReLUPattern
+        LinearBatchNormReLUPattern, ConvBatchNorm2dReLUPattern, ConvBatchNorm2dPattern
     )
 
 # ============================================================================
@@ -60,6 +53,7 @@ class OperatorFusion:
         if patterns is None:
             self.patterns = patterns = [
                 ConvBatchNorm2dReLUPattern(),  # Conv+BN+ReLU (ResNet pattern)
+                ConvBatchNorm2dPattern(),  # Conv+BN
                 LinearBatchNormReLUPattern(),  # Linear+BN+ReLU
                 LinearBatchNormPattern(),      # Linear+BN
                 LinearReLUPattern(),           # Linear+ReLU
@@ -148,70 +142,6 @@ class OperatorFusion:
         
         return Sequential(*fused_modules),fusion_info
     
-    # def fuse_model(self, model: Module) -> Module:
-    #     """
-    #     fuse operators on the entire model
-        
-    #     Args:
-    #         model: Model to be fused
-            
-    #     Returns:
-    #         Module: Fused model
-    #     """
-    #     self.fusion_count = 0
-    #     self.fusion_log = []
-        
-    #     # If the model itself is a Sequential, fuse directly
-    #     if isinstance(model, Sequential):
-    #         return self.fuse_sequential(model)
-        
-    #     # Check if it is an FXGraphExecutor (by checking for layer_N attributes)
-    #     layer_attrs = sorted([name for name in dir(model) if name.startswith('layer_') and name.split('_')[1].isdigit()])
-    #     if layer_attrs:
-    #         # FXGraphExecutor case: extract all layer_N, fuse them, and replace back
-    #         layers = [getattr(model, attr) for attr in layer_attrs]
-    #         temp_sequential = Sequential(*layers)
-    #         fused_sequential = self.fuse_sequential(temp_sequential)
-            
-    #         # Replace back to FXGraphExecutor
-    #         for i, fused_layer in enumerate(fused_sequential.modules):
-    #             attr_name = f"layer_{i}"
-    #             if hasattr(model, attr_name):
-    #                 delattr(model, attr_name)
-    #             setattr(model, attr_name, fused_layer)
-    #             # Update _layer_to_name if it exists
-    #             if hasattr(model, '_layer_to_name'):
-    #                 model._layer_to_name[id(fused_layer)] = attr_name
-            
-    #         # Clean up extra layer attributes
-    #         for i in range(len(fused_sequential.modules), len(layers)):
-    #             attr_name = f"layer_{i}"
-    #             if hasattr(model, attr_name):
-    #                 delattr(model, attr_name)
-            
-    #         return model
-        
-    #     # Otherwise, recursively process all Sequential submodules and complex modules in the model
-    #     for attr_name in dir(model):
-    #         if attr_name.startswith('_'):
-    #             continue
-    #         try:
-    #             attr = getattr(model, attr_name, None)
-    #         except:
-    #             continue
-                
-    #         if attr is None or not isinstance(attr, Module):
-    #             continue
-                
-    #         if isinstance(attr, Sequential):
-    #             fused = self.fuse_sequential(attr)
-    #             setattr(model, attr_name, fused)
-    #         elif not isinstance(attr, (Linear, ReLU, BatchNorm1d, LayerNorm1d, Dropout, Identity, Flatten)):
-    #             # Recursively process complex submodules
-    #             self.fuse_model(attr)
-        
-    #     return model
-    
     def fuse_model(self, model: Module) -> Module:
         self.fusion_count = 0
         self.fusion_log = []
@@ -220,6 +150,7 @@ class OperatorFusion:
         if isinstance(model, Sequential):
             fused_sequential,fusion_info = self.fuse_sequential(model,model.training)
             self._update_fx_graph_mapping(model,model.modules, fused_sequential,fusion_info)
+            self._refresh_use_counts(model)
             return fused_sequential
         
         # 检查是否是 FXGraphExecutor（通过检查是否有 layer_N 属性）
@@ -236,6 +167,7 @@ class OperatorFusion:
             # important update: need to update original FX graph mapping
             # otherwise, the fused layers won't be recognized in the FX graph execution!!
             self._update_fx_graph_mapping(model, layers, fusion_info)
+            self._refresh_use_counts(model)
             
             # 替换回 FXGraphExecutor
             for i, fused_layer in enumerate(fused_sequential.modules):
@@ -334,6 +266,20 @@ class OperatorFusion:
         
         # 应用更新
         model.node_to_layer.update(node_mapping_updates)
+    
+    def _refresh_use_counts(self, model):
+        """
+        融合后重新计算 FXGraphExecutor 的 _use_count 字段
+        """
+        if not hasattr(model,'fx_graph') or not hasattr(model,'_use_count'):
+            return
+        new_counts = {}
+        for node in model.fx_graph.nodes:
+            if node.name not in new_counts:
+                new_counts[node.name] = 0
+            for input_node in node.all_input_nodes:
+                new_counts[input_node.name] = new_counts.get(input_node.name,0) + 1
+        model._use_count = new_counts
 
     def print_fusion_report(self):
         """Print fusion report"""
@@ -372,7 +318,8 @@ class OperatorFusion:
         }
     def _ensure_mapping_consistency(self, model):
         """
-        确保节点映射与层属性一致
+        A function to ensure that the FXGraphExecutor's node_to_layer mapping is consistent with the model's current layers
+        after fusion. Use Just for test & debug.
         """
         if not hasattr(model, 'node_to_layer'):
             return

@@ -73,7 +73,7 @@ def get_performance_stats():
             }
     return stats
 
-def print_performance_summary():
+def print_performance_summary(file_path="performance_summary.txt"):
     """将性能摘要写入文件，每次运行清空，同次运行中追加"""
     global _performance_file_initialized
     
@@ -85,7 +85,7 @@ def print_performance_summary():
     # 决定写入模式：本次运行第一次调用清空，后续调用追加
     mode = "w" if _performance_file_initialized else "a"
     
-    with open("performance_summary.txt", mode, encoding="utf-8") as f:
+    with open(file_path, mode, encoding="utf-8") as f:
         if not _performance_file_initialized:
             # 本次运行第一次调用，写入文件头
             f.write("="*80 + "\n")
@@ -108,7 +108,7 @@ def print_performance_summary():
         f.write("="*80 + "\n")
     
     status = "written to" if mode == "w" else "appended to"
-    print(f"Performance summary has been {status} 'performance_summary.txt'")
+    print(f"Performance summary has been {status} '{file_path}'.")
 
 def reset_performance_tracking(performance_file_initialized=True, hard=False):
     """重置性能跟踪状态，用于新的运行"""

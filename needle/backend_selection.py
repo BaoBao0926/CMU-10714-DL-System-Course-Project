@@ -13,6 +13,7 @@ if BACKEND == "nd":
         cuda,
         cpu,
         cpu_numpy,
+        hip,
         default_device,
         BackendDevice as Device,
     )
@@ -24,5 +25,17 @@ elif BACKEND == "np":
     from .backend_numpy import all_devices, cpu, default_device, Device
 
     NDArray = array_api.ndarray
+elif BACKEND == "hip":
+    print("Using HIP backend")
+    from . import backend_ndarray as array_api
+    from .backend_ndarray import (
+        all_devices,
+        hip,
+        cpu,
+        default_device,
+        BackendDevice as Device,
+    )
+
+    NDArray = array_api.NDArray
 else:
     raise RuntimeError("Unknown needle array backend %s" % BACKEND)
