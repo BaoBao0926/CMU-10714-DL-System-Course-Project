@@ -350,7 +350,6 @@ def fused_conv_batchnorm2d_relu(
     # Apply ReLU activation
     return relu(x)
 
-@profile_operation
 def fused_conv_batchnorm2d(
     x: Tensor,
     weight: Tensor,
