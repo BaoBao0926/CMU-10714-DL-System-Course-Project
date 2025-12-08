@@ -77,6 +77,8 @@ tests/hw4/test_sequence_models.py::test_language_model_implementation[cpu-rnn-1-
 ...
 ```
 
+Then, you can check `torch2needle.ipynb` in the main directory to have fun with torch2needle! 
+
 ## 1.Torch2Needle
 
 ```text
@@ -153,4 +155,4 @@ if success, you'll find a hip version of your cuda code is generated in `src` di
 
 ## Profile our implementation
 
-You are free to run `profile_full_pipeline_resnet.py` and `profile_full_pipelilne_unet.py` to profile our implementation after switch to `profiling` branch. Previous profile reports for these two models are also provided.
+You are free to run `profile_full_pipeline_resnet.py` and `profile_full_pipelilne_unet.py` to profile our implementation after switch to `profiling` branch. Previous profile reports for these two models are also provided. Or, you can check our previous profiling record in file name `performance_summary_model_name.txt`

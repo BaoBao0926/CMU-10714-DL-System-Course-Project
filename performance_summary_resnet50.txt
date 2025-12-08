@@ -1,0 +1,25 @@
+
+--------------------------------------------------------------------------------
+ADDITIONAL PERFORMANCE DATA
+--------------------------------------------------------------------------------
+Conv.forward............................ calls:   5883 | avg:    6.151ms | total:  36187.072ms
+BatchNorm2d.forward..................... calls:   5883 | avg:    5.205ms | total:  30620.038ms
+ReLU.forward............................ calls:   5439 | avg:    0.029ms | total:    159.225ms
+Linear.forward.......................... calls:    111 | avg:    0.824ms | total:     91.513ms
+AdaptiveAvgPool2d.forward............... calls:    111 | avg:    0.085ms | total:      9.485ms
+MaxPool2d.forward....................... calls:    111 | avg:    0.031ms | total:      3.490ms
+Flatten.forward......................... calls:    111 | avg:    0.009ms | total:      1.038ms
+================================================================================
+================================================================================
+PERFORMANCE SUMMARY (sorted by total execution time)
+================================================================================
+Tensor.fused_conv_batchnorm2d........... calls:   3996 | avg:    6.579ms | total:  26288.219ms
+Tensor.fused_conv_batchnorm2d_relu...... calls:   1887 | avg:    4.439ms | total:   8377.100ms
+ReLU.forward............................ calls:   3552 | avg:    0.026ms | total:     93.100ms
+Linear.forward.......................... calls:    111 | avg:    0.823ms | total:     91.381ms
+MaxPool2d.forward....................... calls:    111 | avg:    0.057ms | total:      6.305ms
+AdaptiveAvgPool2d.forward............... calls:    111 | avg:    0.054ms | total:      6.009ms
+Identity.forward........................ calls:   7770 | avg:    0.000ms | total:      2.883ms
+Flatten.forward......................... calls:    111 | avg:    0.009ms | total:      0.988ms
+================================================================================
+The average time after fusion was 49.66% less than that before fusion
