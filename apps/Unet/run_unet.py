@@ -2,15 +2,14 @@ import sys
 import torch
 import numpy as np
 import argparse
-from torchvision import models
+from unet import UNet
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Run PyTorch→Needle pipeline for ResNet with optional fusion.")
     parser.add_argument("--backend", type=str, default="nd",choices=["nd","hip"],)
-    parser.add_argument("--model", type=str, default="resnet18",
-                        choices=["resnet18", "resnet50", "resnet101"],
-                        help="Select torchvision ResNet model.")
+    parser.add_argument("--n_channels",type=int,default=3)
+    parser.add_argument("--n_classes",type=int,default=1)
     parser.add_argument("--device", type=str, default="cpu",
                         choices=["cpu", "cuda", "hip"],
                         help="Backend device for Needle.")
@@ -56,8 +55,8 @@ def _run_pipeline_test(torch_model, input_shape,device,dtype,
     with torch.no_grad():
         torch_output = torch_model(test_input)
     
-    print(f"PyTorch model architecture:")
-    print(torch_model)
+    # print(f"PyTorch model architecture:")
+    # print(torch_model)
     print(f"PyTorch model input shape: {test_input.shape}")
     print(f"PyTorch model output shape: {torch_output.shape}")
     
@@ -119,8 +118,8 @@ def _run_pipeline_test(torch_model, input_shape,device,dtype,
         print("❌ Fusion has error!")
         return False
     
-    # Step 8: Compared fused model and non-fused model
-    print("\n【Step 8】Compared fused model and non-fused model")
+    # Step 7: Compared fused model and non-fused model
+    print("\n【Step 7】Compared fused model and non-fused model")
     diff_fusion = np.abs(needle_output_before.numpy() - needle_output_after.numpy())
     max_diff_fusion = np.max(diff_fusion)
     print(f"Max difference before and after fused: {max_diff_fusion:.2e}")
@@ -146,18 +145,6 @@ def resolve_device(ndl,device_str):
     else:
         raise ValueError(f"Unsupported device: {device_str}")
 
-def build_torch_model(name: str, weights: str):
-    print(f"Building Torch model: {name} with weights: {weights}")
-    if name == "resnet18":
-        w = None if weights.upper() == "NONE" else getattr(models.ResNet18_Weights,weights)
-        return models.resnet18(weights=w)
-    if name == "resnet50":
-        w = None if weights.upper() == "NONE" else getattr(models.ResNet50_Weights,weights)
-        return models.resnet50(weights=w)
-    if name == "resnet101":
-        w = None if weights.upper() == "NONE" else getattr(models.ResNet101_Weights,weights)
-        return models.resnet101(weights=w)
-    raise ValueError(f"Unknown model: {name}")
 
 if __name__ == "__main__":
     all_passed = True
@@ -168,10 +155,10 @@ if __name__ == "__main__":
     ndl, Tensor, Sequential, torch2needle_fx, load_torch_weights_by_mapping, OperatorFusion = import_needle_modules()
     device = resolve_device(ndl,args.device)
     dtype = args.dtype
-    model = build_torch_model(args.model, args.weights)
+    model = UNet(n_channels=args.n_channels,n_classes=args.n_classes)
     input_shape = (args.batch, 3, args.height, args.width)
     print("\n\n" + "=" * 80)
-    print(f"test: {args.model} model, device={args.device}, input={input_shape}, dtype={dtype}")
+    print(f"test: Unet model, device={args.device}, input={input_shape}, dtype={dtype}")
     print("=" * 80)
 
     all_passed &= _run_pipeline_test(model,input_shape,device,dtype,

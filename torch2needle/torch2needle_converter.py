@@ -31,7 +31,7 @@ import operator
 # Torch2Needle, starter function
 def torch2needle_fx(torch_model, device=nd.cpu(), dtype="float32"):
     traced = symbolic_trace(torch_model)
-    print(traced)
+    #print(traced)
     named_modules = dict(traced.named_modules())
     node_to_layer = {}
 

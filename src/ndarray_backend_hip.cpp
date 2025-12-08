@@ -1047,6 +1047,143 @@ void ConvBNReluFused(const HipArray& input, HipArray* output,
   miopenDestroy(handle);
 }
 
+void ConvBNFused(const HipArray& input, HipArray* output,
+                     const HipArray& weight, const HipArray& bias,
+                     const HipArray& scale, const HipArray& shift,
+                     const HipArray& running_mean, const HipArray& running_var,
+                     uint32_t batch, uint32_t in_channels, uint32_t in_height, uint32_t in_width,
+                     uint32_t out_channels, uint32_t kernel_h, uint32_t kernel_w,
+                     uint32_t stride, uint32_t padding, float eps = 1e-5f) {
+  /**
+   * Fused Convolution + BatchNorm operation.
+   * 
+   * Args:
+   *   input: input array of shape (batch, in_channels, in_height, in_width)
+   *   output: output array
+   *   weight: convolution kernel of shape (out_channels, in_channels, kernel_h, kernel_w)
+   *   bias: bias for convolution of shape (out_channels,)
+   *   scale: scale parameters (gamma) of shape (out_channels,)
+   *   shift: shift parameters (beta) of shape (out_channels,)
+   *   running_mean: running mean of shape (out_channels,)
+   *   running_var: running variance of shape (out_channels,)
+   *   batch: batch size
+   *   in_channels: number of input channels
+   *   in_height: input height
+   *   in_width: input width
+   *   out_channels: number of output channels (filters)
+   *   kernel_h: kernel height
+   *   kernel_w: kernel width
+   *   stride: stride for convolution
+   *   padding: padding for convolution
+   *   eps: epsilon for numerical stability
+   */  
+  miopenHandle_t handle;
+  miopenStatus_t status = miopenCreate(&handle);
+  if (status != miopenStatusSuccess) {
+    throw std::runtime_error("Fail to create MIOpen handle");
+  }
+
+  // Input/output descriptors (NCHW)
+  miopenTensorDescriptor_t input_desc, output_desc, weight_desc, bn_desc;
+  miopenCreateTensorDescriptor(&input_desc);
+  miopenCreateTensorDescriptor(&output_desc);
+  miopenCreateTensorDescriptor(&weight_desc);
+  miopenCreateTensorDescriptor(&bn_desc);
+
+
+  // Output dims from conv
+  miopenConvolutionDescriptor_t conv_desc;
+  miopenCreateConvolutionDescriptor(&conv_desc);
+  // set descriptors (NCHW)
+  miopenSet4dTensorDescriptor(input_desc, miopenFloat, batch, in_channels, in_height, in_width);
+  miopenSet4dTensorDescriptor(weight_desc, miopenFloat, out_channels, in_channels, kernel_h, kernel_w);
+  miopenInitConvolutionDescriptor(conv_desc, miopenConvolution,
+                                  padding, padding, stride, stride, 1, 1);
+
+  int out_n, out_c, out_h, out_w;
+  status = miopenGetConvolutionForwardOutputDim(conv_desc, input_desc, weight_desc,
+                                                &out_n, &out_c, &out_h, &out_w);
+
+  // std::cout << "Conv output dims: (" << out_n << "," << out_c << "," << out_h << "," << out_w << ")\n";
+  if (status != miopenStatusSuccess) {
+    throw std::runtime_error("Fail to get conv output dims");
+  }
+  miopenSet4dTensorDescriptor(output_desc, miopenFloat, out_n, out_c, out_h, out_w);
+
+  // Sanity: output buffer size must match
+  size_t total = static_cast<size_t>(out_n) * out_c * out_h * out_w;
+  if (total != output->size) {
+    std::ostringstream oss;
+    oss << "Conv output size mismatch. MIOpen=("
+        << out_n << "," << out_c << "," << out_h << "," << out_w
+        << ") total=" << total << " but out->size=" << output->size;
+    throw std::runtime_error(oss.str());
+  }
+  
+  // Workspace for convolution
+  size_t workspace_size = 0;
+  miopenConvolutionForwardGetWorkSpaceSize(handle, weight_desc, input_desc, conv_desc, output_desc, &workspace_size);
+  
+  // Allocate workspace
+  void* workspace = nullptr;
+  if (workspace_size > 0) {
+    hipMalloc(&workspace, workspace_size);
+  }
+  
+  // // Get algorithm
+  // miopenConvFwdAlgorithm_t algo = miopenConvolutionFwdAlgoGEMM;
+
+  miopenConvAlgoPerf_t perf_results;
+  int returned_algo_count = 0;
+  miopenFindConvolutionForwardAlgorithm(
+      handle, input_desc, input.ptr, weight_desc, weight.ptr,
+      conv_desc, output_desc, output->ptr, 
+      1, &returned_algo_count, &perf_results, 
+      workspace, workspace_size, false);
+      
+  miopenConvFwdAlgorithm_t algo = perf_results.fwd_algo;
+  
+  // Perform convolution
+  float alpha = 1.0f, beta = 0.0f;
+  status = miopenConvolutionForward(handle, &alpha, input_desc, input.ptr, weight_desc, weight.ptr,
+                          conv_desc, algo, &beta, output_desc, output->ptr,
+                          workspace, workspace_size);
+                         
+  hipDeviceSynchronize();
+  // Ensure conv completes before further ops (e.g., your HIP reduce/sum)
+  if(status != miopenStatusSuccess) {
+    throw std::runtime_error("Fail to execute convolution forward");
+  }
+
+  // Add bias
+  HipDims dim = HipOneDim(total);
+  addChannelBiasKernel<<<dim.grid, dim.block>>>(output->ptr, bias.ptr, output->ptr,
+                                                out_n, out_c, out_h, out_w);
+  hipDeviceSynchronize();
+
+  // BatchNorm (inference mode)
+  miopenSet4dTensorDescriptor(bn_desc, miopenFloat, 1, out_c, 1, 1);
+  status = miopenBatchNormalizationForwardInference(
+      handle, miopenBNSpatial, &alpha, &beta,
+      output_desc, output->ptr,     // input
+      output_desc, output->ptr,  // output
+      bn_desc, scale.ptr, shift.ptr,           // scale (gamma), bias (beta)
+      running_mean.ptr, running_var.ptr,      // running mean & variance
+      eps                        // epsilon
+  );
+  if (status != miopenStatusSuccess) {
+    throw std::runtime_error("Fail to execute batchnorm forward inference");
+  }
+  // Cleanup
+  if (workspace) hipFree(workspace);
+  miopenDestroyConvolutionDescriptor(conv_desc);
+  miopenDestroyTensorDescriptor(bn_desc);
+  miopenDestroyTensorDescriptor(weight_desc);
+  miopenDestroyTensorDescriptor(output_desc);
+  miopenDestroyTensorDescriptor(input_desc);
+  miopenDestroy(handle);
+}
+
 __global__ void max_pool2d(const scalar_t* input, scalar_t* output,int batch_size, int channels,
                             int input_h, int input_w, int output_h, int output_w,
                             int kernel_h, int kernel_w, int stride_h, int stride_w,
@@ -1242,4 +1379,5 @@ PYBIND11_MODULE(ndarray_backend_hip, m) {
   m.def("batchnorm2d",BatchNorm2D);
   m.def("convbn2drelu",ConvBNReluFused);
   m.def("maxpool2d",MaxPool2D);
+  m.def("convbn2d",ConvBNFused);
 }

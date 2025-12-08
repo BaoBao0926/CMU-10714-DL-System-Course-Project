@@ -171,3 +171,45 @@ class MaxPool2D(TensorOp):
 def max_pool2d(x: Tensor, kernel_size=3, stride=1, padding=0) -> Tensor:
     return MaxPool2D(kernel_size,stride,padding)(x)
 
+class ConvBatchnorm2d(TensorOp):
+    def __init__(self, out_channel:int,stride: Optional[int] = 1, padding: Optional[int] = 0,
+                bias:Optional[Tensor]=None,
+                scale:Optional[Tensor]=None, shift:Optional[Tensor]=None,
+                running_mean:Optional[Tensor]=None, running_var:Optional[Tensor]=None,
+                eps: float = 1e-5, momentum: float = 0.1):
+        self.stride = stride
+        self.padding = padding
+        self.out_channel = out_channel
+        self.eps = eps
+        self.momentum = momentum
+        self.bias = bias.cached_data if bias is not None else zeros(out_channel,device=hip()).cached_data
+        self.scale = scale.cached_data
+        self.shift = shift.cached_data
+        self.running_mean = running_mean.cached_data
+        self.running_var = running_var.cached_data
+    def compute(self, A: NDArray, B: NDArray) -> NDArray:
+        N,Cin,H,W = A.shape
+        Cout,_,K,_ = B.shape
+        P = self.padding
+        S = self.stride
+        H_out = (H +2*P - K) // S +1
+        W_out = (W +2*P - K) // S +1
+        out = NDArray.make((N,Cout,H_out,W_out),device=A.device)
+        hip_backend.convbn2d(A.compact()._handle,out._handle,
+                             B.compact()._handle,self.bias.compact()._handle,
+                             self.scale.compact()._handle,self.shift.compact()._handle,
+                             self.running_mean.compact()._handle,
+                             self.running_var.compact()._handle,
+                             N,Cin,H,W,Cout,K,K,S,P,self.eps)
+        return out
+    def gradient(self, out_grad: Tensor, node: Tensor) -> List[Tensor]:
+        ### implement ConvBatchnorm2d gradient for AMD backend if needed ###
+        raise NotImplementedError()
+
+def convbn2d(X: Tensor, W: Tensor, out_channel:int, stride: Optional[int] = 1, padding: Optional[int] = 0,
+             bias:Optional[Tensor]=None,
+             scale:Optional[Tensor]=None, shift:Optional[Tensor]=None,
+             running_mean:Optional[Tensor]=None, running_var:Optional[Tensor]=None,
+             eps: float = 1e-5, momentum: float = 0.1) -> Tensor:
+    return ConvBatchnorm2d(out_channel,stride, padding, bias, scale, shift,
+                           running_mean, running_var, eps, momentum)(X, W)

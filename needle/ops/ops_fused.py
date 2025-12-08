@@ -23,7 +23,7 @@ from ..autograd import Tensor
 from .ops_mathematic import matmul, broadcast_to, summation, reshape, relu, multiply, add, conv
 import os
 if os.environ.get("NEEDLE_BACKEND") == "hip":
-    from .ops_hip import conv_batchnorm2d_relu
+    from .ops_hip import conv_batchnorm2d_relu,convbn2d
 from ..backend_ndarray import ndarray as nd
 import numpy as np
 
@@ -362,6 +362,93 @@ def fused_conv_batchnorm2d_relu(
         # Apply ReLU activation
         return relu(out_final)
 
+def fused_conv_batchnorm2d(
+    x: Tensor,
+    weight: Tensor,
+    out_channels: int,
+    conv_bias: Optional[Tensor],
+    bn_weight: Tensor,
+    bn_bias: Tensor,
+    running_mean: Tensor,
+    running_var: Tensor,
+    stride: int = 1,
+    padding: int = 1,
+    eps: float = 1e-5,
+    momentum: float = 0.1,
+    training: bool = True,
+) -> Tensor:
+    """
+    Fused Conv2d + BatchNorm2d operation.
+    
+    Computes: BatchNorm2d(Conv2d(x))
+    
+    This fusion reduces memory allocations and bandwidth by avoiding
+    intermediate storage of the convolution output before batch normalization.
+    
+    Args:
+        x: Input tensor in NCHW format, shape (batch_size, in_channels, height, width)
+        weight: Conv weight of shape (kernel_size, kernel_size, in_channels, out_channels)
+        conv_bias: Optional conv bias of shape (out_channels,)
+        bn_weight: BatchNorm scale (gamma) of shape (out_channels,)
+        bn_bias: BatchNorm shift (beta) of shape (out_channels,)
+        running_mean: Running mean of shape (out_channels,)
+        running_var: Running variance of shape (out_channels,)
+        stride: Convolution stride
+        padding: Convolution padding
+        eps: Small constant for numerical stability in BatchNorm
+        momentum: Momentum for running statistics update
+        training: Training vs eval mode
+    
+    Returns:
+        Output tensor in NCHW format after BatchNorm2d
+    """
+    if x.device == nd.hip():
+        return convbn2d(
+            x, weight, out_channels,stride, padding,
+            conv_bias, bn_weight, bn_bias,
+            running_mean, running_var,
+            eps, momentum
+        )
+    else:
+        # Convert from NCHW to NHWC for conv operation
+        x_nhwc = x.transpose((0, 2, 3, 1))  # N,C,H,W -> N,H,W,C
+        
+        # Convolution
+        out = conv(x_nhwc, weight, stride=stride, padding=padding)
+        
+        # Add conv bias if provided
+        if conv_bias is not None:
+            bias_broadcast = conv_bias.broadcast_to(out.shape)
+            out = out + bias_broadcast
+        
+        # Convert back to NCHW for BatchNorm2d
+        out_nchw = out.transpose((0, 3, 1, 2))  # N,H,W,C -> N,C,H,W
+        
+        # BatchNorm2d: process as (N*H*W, C)
+        N, C, H, W = out_nchw.shape
+        
+        # Reshape to (N*H*W, C) for batch norm computation
+        out_reshaped = out_nchw.transpose((1, 2)).transpose((2, 3)).reshape((N * H * W, C))
+        
+        if training:
+            # Compute batch statistics across N*H*W dimension
+            batch_size = N * H * W
+            mean = out_reshaped.sum(axes=0)/ batch_size  # shape: (1, C)
+            var = ((out_reshaped - mean.broadcast_to(out_reshaped.shape)) ** 2).sum(axes=0) / batch_size
+        else:
+            # Use running statistics
+            mean = running_mean
+            var = running_var
+        out_normalized = (out_reshaped - mean.broadcast_to(out_reshaped.shape)) / ((var.broadcast_to(out_reshaped.shape) + eps) ** 0.5)
+        # Apply affine transformation
+        weight_broadcast = bn_weight.broadcast_to(out_normalized.shape)
+        bias_broadcast = bn_bias.broadcast_to(out_normalized.shape)
+        out_bn = weight_broadcast * out_normalized + bias_broadcast
+        
+        # Reshape back to NCHW
+        out_bn_reshaped = out_bn.reshape((N, H, W, C))
+        out_final = out_bn_reshaped.transpose((2, 3)).transpose((1, 2))  # N,H,W,C -> N,C,H,W
+    return out_final
 
 def fused_multihead_attention(
     q: Tensor,

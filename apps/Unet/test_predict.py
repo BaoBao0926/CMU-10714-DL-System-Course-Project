@@ -1,8 +1,8 @@
 import sys
 import numpy as np
-import os
-sys.path.append(os.path.dirname(__file__))
-os.environ["NEEDLE_BACKEND"] = "hip"
+# import os
+# sys.path.append(os.path.dirname(__file__))
+# os.environ["NEEDLE_BACKEND"] = "hip"
 import torch
 import torch.nn.functional as F
 import needle as ndl
@@ -123,12 +123,13 @@ def _run_pipeline_test(torch_model, input_shape,device=ndl.cpu(),dtype="fl"):
 
 if __name__ == "__main__":
     all_passed = True
-    device = ndl.hip()
+    #device = ndl.hip()
+    device = ndl.cuda()
     # 示例：测试 UNet 模型
     print("运行 UNet 模型测试")
     print("=" * 80)
-    torch_unet = UNet(n_channels=3, n_classes=1)
-    input_shape = (1, 3, 572, 572)  # UNet 输入形状
+    torch_unet = UNet(n_channels=3, n_classes=2)
+    input_shape = (2, 3, 224, 224)  # UNet 输入形状
     all_passed &= _run_pipeline_test(torch_unet, input_shape,device=device,dtype="float32")
     # 总结
     print("\n\n" + "=" * 80)

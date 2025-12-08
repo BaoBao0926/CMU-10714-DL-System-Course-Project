@@ -1,0 +1,262 @@
+Using needle backend
+
+
+================================================================================
+test: Unet model, device=cuda, input=(1, 3, 224, 224), dtype=float32
+================================================================================
+
+【Step 1】PyTorch model Prepare
+PyTorch model input shape: torch.Size([1, 3, 224, 224])
+PyTorch model output shape: torch.Size([1, 2, 224, 224])
+
+【Step 2】Transfer to needle model
+Needle model type: FXGraphExecutor
+Needle model structure:
+FXGraphExecutor(
+  (layer_0): <needle.nn.nn_conv.Conv object at 0x7ea35f0fc6e0>
+  (layer_1): <needle.nn.nn_basic.BatchNorm2d object at 0x7ea34b461af0>
+  (layer_10): <needle.nn.nn_conv.Conv object at 0x7ea34b479070>
+  (layer_11): <needle.nn.nn_basic.BatchNorm2d object at 0x7ea34b4792b0>
+  (layer_12): <needle.nn.nn_basic.ReLU object at 0x7ea34b4792e0>
+  (layer_13): <needle.nn.nn_conv.MaxPool2d object at 0x7ea34b479460>
+  (layer_14): <needle.nn.nn_conv.Conv object at 0x7ea34b4793a0>
+  (layer_15): <needle.nn.nn_basic.BatchNorm2d object at 0x7ea34b479730>
+  (layer_16): <needle.nn.nn_basic.ReLU object at 0x7ea34b479760>
+  (layer_17): <needle.nn.nn_conv.Conv object at 0x7ea34b4798b0>
+  (layer_18): <needle.nn.nn_basic.BatchNorm2d object at 0x7ea34b479b50>
+  (layer_19): <needle.nn.nn_basic.ReLU object at 0x7ea34b479b80>
+  (layer_2): <needle.nn.nn_basic.ReLU object at 0x7ea35f625c40>
+  (layer_20): <needle.nn.nn_conv.MaxPool2d object at 0x7ea34b479d30>
+  (layer_21): <needle.nn.nn_conv.Conv object at 0x7ea34b479c40>
+  (layer_22): <needle.nn.nn_basic.BatchNorm2d object at 0x7ea34b47a060>
+  (layer_23): <needle.nn.nn_basic.ReLU object at 0x7ea34b47a0c0>
+  (layer_24): <needle.nn.nn_conv.Conv object at 0x7ea34b47a1e0>
+  (layer_25): <needle.nn.nn_basic.BatchNorm2d object at 0x7ea34b47a450>
+  (layer_26): <needle.nn.nn_basic.ReLU object at 0x7ea34b47a480>
+  (layer_27): <needle.nn.nn_conv.MaxPool2d object at 0x7ea34b47a630>
+  (layer_28): <needle.nn.nn_conv.Conv object at 0x7ea34b47a540>
+  (layer_29): <needle.nn.nn_basic.BatchNorm2d object at 0x7ea34b47a930>
+  (layer_3): <needle.nn.nn_conv.Conv object at 0x7ea35f0fde50>
+  (layer_30): <needle.nn.nn_basic.ReLU object at 0x7ea34b47a960>
+  (layer_31): <needle.nn.nn_conv.Conv object at 0x7ea34b47aa80>
+  (layer_32): <needle.nn.nn_basic.BatchNorm2d object at 0x7ea34b47acf0>
+  (layer_33): <needle.nn.nn_basic.ReLU object at 0x7ea34b47ad20>
+  (layer_34): <needle.nn.nn_conv.ConvTranspose2d object at 0x7ea34b463170>
+  (layer_35): SUB(left=<needle.nn.nn_basic.Identity object at 0x7ea34b47aea0>, right=<needle.nn.nn_basic.Identity object at 0x7ea34b47b1d0>)
+  (layer_36): SUB(left=<needle.nn.nn_basic.Identity object at 0x7ea34b47b260>, right=<needle.nn.nn_basic.Identity object at 0x7ea34b47b2c0>)
+  (layer_37): SUB(left=layer_36, right=<needle.nn.nn_basic.Identity object at 0x7ea34b47b350>)
+  (layer_38): SUB(left=layer_35, right=<needle.nn.nn_basic.Identity object at 0x7ea34b47b3e0>)
+  (layer_39): <needle.nn.nn_conv.Conv object at 0x7ea34b47b4a0>
+  (layer_4): <needle.nn.nn_basic.BatchNorm2d object at 0x7ea34b478650>
+  (layer_40): <needle.nn.nn_basic.BatchNorm2d object at 0x7ea34b47b500>
+  (layer_41): <needle.nn.nn_basic.ReLU object at 0x7ea34b47b560>
+  (layer_42): <needle.nn.nn_conv.Conv object at 0x7ea34b47b710>
+  (layer_43): <needle.nn.nn_basic.BatchNorm2d object at 0x7ea34b47b950>
+  (layer_44): <needle.nn.nn_basic.ReLU object at 0x7ea34b47b980>
+  (layer_45): <needle.nn.nn_conv.ConvTranspose2d object at 0x7ea34b47bb00>
+  (layer_46): SUB(left=<needle.nn.nn_basic.Identity object at 0x7ea34b47bd40>, right=<needle.nn.nn_basic.Identity object at 0x7ea34b47be90>)
+  (layer_47): SUB(left=<needle.nn.nn_basic.Identity object at 0x7ea34b47bf20>, right=<needle.nn.nn_basic.Identity object at 0x7ea34b47bf80>)
+  (layer_48): SUB(left=layer_47, right=<needle.nn.nn_basic.Identity object at 0x7ea34b4ac050>)
+  (layer_49): SUB(left=layer_46, right=<needle.nn.nn_basic.Identity object at 0x7ea34b4ac140>)
+  (layer_5): <needle.nn.nn_basic.ReLU object at 0x7ea34b478b60>
+  (layer_50): <needle.nn.nn_conv.Conv object at 0x7ea34b4ac200>
+  (layer_51): <needle.nn.nn_basic.BatchNorm2d object at 0x7ea34b4ac260>
+  (layer_52): <needle.nn.nn_basic.ReLU object at 0x7ea34b4ac2c0>
+  (layer_53): <needle.nn.nn_conv.Conv object at 0x7ea34b4ac440>
+  (layer_54): <needle.nn.nn_basic.BatchNorm2d object at 0x7ea34b4ac680>
+  (layer_55): <needle.nn.nn_basic.ReLU object at 0x7ea34b4ac6b0>
+  (layer_56): <needle.nn.nn_conv.ConvTranspose2d object at 0x7ea34b4ac830>
+  (layer_57): SUB(left=<needle.nn.nn_basic.Identity object at 0x7ea34b4aca70>, right=<needle.nn.nn_basic.Identity object at 0x7ea34b4acbc0>)
+  (layer_58): SUB(left=<needle.nn.nn_basic.Identity object at 0x7ea34b4acc50>, right=<needle.nn.nn_basic.Identity object at 0x7ea34b4accb0>)
+  (layer_59): SUB(left=layer_58, right=<needle.nn.nn_basic.Identity object at 0x7ea34b4acd40>)
+  (layer_6): <needle.nn.nn_conv.MaxPool2d object at 0x7ea34b478c50>
+  (layer_60): SUB(left=layer_57, right=<needle.nn.nn_basic.Identity object at 0x7ea34b4acdd0>)
+  (layer_61): <needle.nn.nn_conv.Conv object at 0x7ea34b4ace90>
+  (layer_62): <needle.nn.nn_basic.BatchNorm2d object at 0x7ea34b4acef0>
+  (layer_63): <needle.nn.nn_basic.ReLU object at 0x7ea34b4acf50>
+  (layer_64): <needle.nn.nn_conv.Conv object at 0x7ea34b4ad0d0>
+  (layer_65): <needle.nn.nn_basic.BatchNorm2d object at 0x7ea34b4ad310>
+  (layer_66): <needle.nn.nn_basic.ReLU object at 0x7ea34b4ad340>
+  (layer_67): <needle.nn.nn_conv.ConvTranspose2d object at 0x7ea34b4ad4c0>
+  (layer_68): SUB(left=<needle.nn.nn_basic.Identity object at 0x7ea34b4ad700>, right=<needle.nn.nn_basic.Identity object at 0x7ea34b4ad850>)
+  (layer_69): SUB(left=<needle.nn.nn_basic.Identity object at 0x7ea34b4ad8e0>, right=<needle.nn.nn_basic.Identity object at 0x7ea34b4ad940>)
+  (layer_7): <needle.nn.nn_conv.Conv object at 0x7ea35f07b650>
+  (layer_70): SUB(left=layer_69, right=<needle.nn.nn_basic.Identity object at 0x7ea34b4ad9d0>)
+  (layer_71): SUB(left=layer_68, right=<needle.nn.nn_basic.Identity object at 0x7ea34b4ada60>)
+  (layer_72): <needle.nn.nn_conv.Conv object at 0x7ea34b4adb20>
+  (layer_73): <needle.nn.nn_basic.BatchNorm2d object at 0x7ea34b4adb80>
+  (layer_74): <needle.nn.nn_basic.ReLU object at 0x7ea34b4adbe0>
+  (layer_75): <needle.nn.nn_conv.Conv object at 0x7ea34b4add60>
+  (layer_76): <needle.nn.nn_basic.BatchNorm2d object at 0x7ea34b4adfa0>
+  (layer_77): <needle.nn.nn_basic.ReLU object at 0x7ea34b4adfd0>
+  (layer_78): <needle.nn.nn_conv.Conv object at 0x7ea34b4ae150>
+  (layer_8): <needle.nn.nn_basic.BatchNorm2d object at 0x7ea34b478e90>
+  (layer_9): <needle.nn.nn_basic.ReLU object at 0x7ea34b478ef0>
+)
+
+【Step 3】Load weight to needle model
+[✔] Copied Conv2d(3, 64, kernel_size=(3, 3))
+[✔] Copied BatchNorm2d(64)
+[✔] ReLU (no weights)
+[✔] Copied Conv2d(64, 64, kernel_size=(3, 3))
+[✔] Copied BatchNorm2d(64)
+[✔] ReLU (no weights)
+[✔] MaxPool2d (no weights)
+[✔] Copied Conv2d(64, 128, kernel_size=(3, 3))
+[✔] Copied BatchNorm2d(128)
+[✔] ReLU (no weights)
+[✔] Copied Conv2d(128, 128, kernel_size=(3, 3))
+[✔] Copied BatchNorm2d(128)
+[✔] ReLU (no weights)
+[✔] MaxPool2d (no weights)
+[✔] Copied Conv2d(128, 256, kernel_size=(3, 3))
+[✔] Copied BatchNorm2d(256)
+[✔] ReLU (no weights)
+[✔] Copied Conv2d(256, 256, kernel_size=(3, 3))
+[✔] Copied BatchNorm2d(256)
+[✔] ReLU (no weights)
+[✔] MaxPool2d (no weights)
+[✔] Copied Conv2d(256, 512, kernel_size=(3, 3))
+[✔] Copied BatchNorm2d(512)
+[✔] ReLU (no weights)
+[✔] Copied Conv2d(512, 512, kernel_size=(3, 3))
+[✔] Copied BatchNorm2d(512)
+[✔] ReLU (no weights)
+[✔] MaxPool2d (no weights)
+[✔] Copied Conv2d(512, 1024, kernel_size=(3, 3))
+[✔] Copied BatchNorm2d(1024)
+[✔] ReLU (no weights)
+[✔] Copied Conv2d(1024, 1024, kernel_size=(3, 3))
+[✔] Copied BatchNorm2d(1024)
+[✔] ReLU (no weights)
+[✔] Copied ConvTranspose2d(1024, 512, kernel_size=(2, 2))
+[✔] Copied Conv2d(1024, 512, kernel_size=(3, 3))
+[✔] Copied BatchNorm2d(512)
+[✔] ReLU (no weights)
+[✔] Copied Conv2d(512, 512, kernel_size=(3, 3))
+[✔] Copied BatchNorm2d(512)
+[✔] ReLU (no weights)
+[✔] Copied ConvTranspose2d(512, 256, kernel_size=(2, 2))
+[✔] Copied Conv2d(512, 256, kernel_size=(3, 3))
+[✔] Copied BatchNorm2d(256)
+[✔] ReLU (no weights)
+[✔] Copied Conv2d(256, 256, kernel_size=(3, 3))
+[✔] Copied BatchNorm2d(256)
+[✔] ReLU (no weights)
+[✔] Copied ConvTranspose2d(256, 128, kernel_size=(2, 2))
+[✔] Copied Conv2d(256, 128, kernel_size=(3, 3))
+[✔] Copied BatchNorm2d(128)
+[✔] ReLU (no weights)
+[✔] Copied Conv2d(128, 128, kernel_size=(3, 3))
+[✔] Copied BatchNorm2d(128)
+[✔] ReLU (no weights)
+[✔] Copied ConvTranspose2d(128, 64, kernel_size=(2, 2))
+[✔] Copied Conv2d(128, 64, kernel_size=(3, 3))
+[✔] Copied BatchNorm2d(64)
+[✔] ReLU (no weights)
+[✔] Copied Conv2d(64, 64, kernel_size=(3, 3))
+[✔] Copied BatchNorm2d(64)
+[✔] ReLU (no weights)
+[✔] Copied Conv2d(64, 2, kernel_size=(1, 1))
+
+✅ Successfully copied 63/76 layers (13 skipped).
+
+【Step 4】Verify converted model
+Max difference after conversion: 6.71e-08
+✅ Conversion is correct!
+
+【Step 5】Perform operator fusion
+
+Fuse report:
+
+============================================================
+Operator Fusion Report
+============================================================
+Total fusions: 18
+------------------------------------------------------------
+Position Fusion Pattern            Original Operators  
+------------------------------------------------------------
+0        ConvBatchNorm2dReLU       Conv -> BatchNorm2d -> ReLU
+3        ConvBatchNorm2dReLU       Conv -> BatchNorm2d -> ReLU
+7        ConvBatchNorm2dReLU       Conv -> BatchNorm2d -> ReLU
+10       ConvBatchNorm2dReLU       Conv -> BatchNorm2d -> ReLU
+14       ConvBatchNorm2dReLU       Conv -> BatchNorm2d -> ReLU
+17       ConvBatchNorm2dReLU       Conv -> BatchNorm2d -> ReLU
+21       ConvBatchNorm2dReLU       Conv -> BatchNorm2d -> ReLU
+24       ConvBatchNorm2dReLU       Conv -> BatchNorm2d -> ReLU
+28       ConvBatchNorm2dReLU       Conv -> BatchNorm2d -> ReLU
+31       ConvBatchNorm2dReLU       Conv -> BatchNorm2d -> ReLU
+39       ConvBatchNorm2dReLU       Conv -> BatchNorm2d -> ReLU
+42       ConvBatchNorm2dReLU       Conv -> BatchNorm2d -> ReLU
+50       ConvBatchNorm2dReLU       Conv -> BatchNorm2d -> ReLU
+53       ConvBatchNorm2dReLU       Conv -> BatchNorm2d -> ReLU
+61       ConvBatchNorm2dReLU       Conv -> BatchNorm2d -> ReLU
+64       ConvBatchNorm2dReLU       Conv -> BatchNorm2d -> ReLU
+72       ConvBatchNorm2dReLU       Conv -> BatchNorm2d -> ReLU
+75       ConvBatchNorm2dReLU       Conv -> BatchNorm2d -> ReLU
+============================================================
+
+
+Fused model:
+FXGraphExecutor(
+  (layer_0): <operator_fusion.fused_layer.ConvBatchNorm2dReLU object at 0x7ea34b4ff6b0>
+  (layer_1): <operator_fusion.fused_layer.ConvBatchNorm2dReLU object at 0x7ea34b4c5eb0>
+  (layer_10): <operator_fusion.fused_layer.ConvBatchNorm2dReLU object at 0x7ea34b4ff7a0>
+  (layer_11): <needle.nn.nn_conv.MaxPool2d object at 0x7ea34b47a630>
+  (layer_12): <operator_fusion.fused_layer.ConvBatchNorm2dReLU object at 0x7ea34b4ff800>
+  (layer_13): <operator_fusion.fused_layer.ConvBatchNorm2dReLU object at 0x7ea34b4ff770>
+  (layer_14): <needle.nn.nn_conv.ConvTranspose2d object at 0x7ea34b463170>
+  (layer_15): SUB(left=<needle.nn.nn_basic.Identity object at 0x7ea34b47aea0>, right=<needle.nn.nn_basic.Identity object at 0x7ea34b47b1d0>)
+  (layer_16): SUB(left=<needle.nn.nn_basic.Identity object at 0x7ea34b47b260>, right=<needle.nn.nn_basic.Identity object at 0x7ea34b47b2c0>)
+  (layer_17): SUB(left=layer_16, right=<needle.nn.nn_basic.Identity object at 0x7ea34b47b350>)
+  (layer_18): SUB(left=layer_15, right=<needle.nn.nn_basic.Identity object at 0x7ea34b47b3e0>)
+  (layer_19): <operator_fusion.fused_layer.ConvBatchNorm2dReLU object at 0x7ea34b4ff740>
+  (layer_2): <needle.nn.nn_conv.MaxPool2d object at 0x7ea34b478c50>
+  (layer_20): <operator_fusion.fused_layer.ConvBatchNorm2dReLU object at 0x7ea34b4ff890>
+  (layer_21): <needle.nn.nn_conv.ConvTranspose2d object at 0x7ea34b47bb00>
+  (layer_22): SUB(left=<needle.nn.nn_basic.Identity object at 0x7ea34b47bd40>, right=<needle.nn.nn_basic.Identity object at 0x7ea34b47be90>)
+  (layer_23): SUB(left=<needle.nn.nn_basic.Identity object at 0x7ea34b47bf20>, right=<needle.nn.nn_basic.Identity object at 0x7ea34b47bf80>)
+  (layer_24): SUB(left=layer_23, right=<needle.nn.nn_basic.Identity object at 0x7ea34b4ac050>)
+  (layer_25): SUB(left=layer_22, right=<needle.nn.nn_basic.Identity object at 0x7ea34b4ac140>)
+  (layer_26): <operator_fusion.fused_layer.ConvBatchNorm2dReLU object at 0x7ea34b4ff710>
+  (layer_27): <operator_fusion.fused_layer.ConvBatchNorm2dReLU object at 0x7ea34b4ff8f0>
+  (layer_28): <needle.nn.nn_conv.ConvTranspose2d object at 0x7ea34b4ac830>
+  (layer_29): SUB(left=<needle.nn.nn_basic.Identity object at 0x7ea34b4aca70>, right=<needle.nn.nn_basic.Identity object at 0x7ea34b4acbc0>)
+  (layer_3): <operator_fusion.fused_layer.ConvBatchNorm2dReLU object at 0x7ea34b4aeab0>
+  (layer_30): SUB(left=<needle.nn.nn_basic.Identity object at 0x7ea34b4acc50>, right=<needle.nn.nn_basic.Identity object at 0x7ea34b4accb0>)
+  (layer_31): SUB(left=layer_30, right=<needle.nn.nn_basic.Identity object at 0x7ea34b4acd40>)
+  (layer_32): SUB(left=layer_29, right=<needle.nn.nn_basic.Identity object at 0x7ea34b4acdd0>)
+  (layer_33): <operator_fusion.fused_layer.ConvBatchNorm2dReLU object at 0x7ea34b4fccb0>
+  (layer_34): <operator_fusion.fused_layer.ConvBatchNorm2dReLU object at 0x7ea34b4ffa70>
+  (layer_35): <needle.nn.nn_conv.ConvTranspose2d object at 0x7ea34b4ad4c0>
+  (layer_36): SUB(left=<needle.nn.nn_basic.Identity object at 0x7ea34b4ad700>, right=<needle.nn.nn_basic.Identity object at 0x7ea34b4ad850>)
+  (layer_37): SUB(left=<needle.nn.nn_basic.Identity object at 0x7ea34b4ad8e0>, right=<needle.nn.nn_basic.Identity object at 0x7ea34b4ad940>)
+  (layer_38): SUB(left=layer_37, right=<needle.nn.nn_basic.Identity object at 0x7ea34b4ad9d0>)
+  (layer_39): SUB(left=layer_36, right=<needle.nn.nn_basic.Identity object at 0x7ea34b4ada60>)
+  (layer_4): <operator_fusion.fused_layer.ConvBatchNorm2dReLU object at 0x7ea34b4ff830>
+  (layer_40): <operator_fusion.fused_layer.ConvBatchNorm2dReLU object at 0x7ea34b4ff4a0>
+  (layer_41): <operator_fusion.fused_layer.ConvBatchNorm2dReLU object at 0x7ea34b4ffad0>
+  (layer_42): <needle.nn.nn_conv.Conv object at 0x7ea34b4ae150>
+  (layer_5): <needle.nn.nn_conv.MaxPool2d object at 0x7ea34b479460>
+  (layer_6): <operator_fusion.fused_layer.ConvBatchNorm2dReLU object at 0x7ea34b4ff6e0>
+  (layer_7): <operator_fusion.fused_layer.ConvBatchNorm2dReLU object at 0x7ea34b4ff980>
+  (layer_8): <needle.nn.nn_conv.MaxPool2d object at 0x7ea34b479d30>
+  (layer_9): <operator_fusion.fused_layer.ConvBatchNorm2dReLU object at 0x7ea34b4ff9e0>
+)
+
+【Step 6】Verify conversion of fused model with torch model
+Max difference between fused and torch model: 6.71e-08
+✅ Fusion correct!
+
+【Step 7】Compared fused model and non-fused model
+Max difference before and after fused: 0.00e+00
+✅ Fusion produces no difference
+
+================================================================================
+✅ Test passed!
+================================================================================
+
+
+================================================================================
+🎉 all test passed!
+================================================================================

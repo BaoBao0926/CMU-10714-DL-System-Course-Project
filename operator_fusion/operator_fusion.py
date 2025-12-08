@@ -15,13 +15,6 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from needle.autograd import Tensor
 from needle.ops.ops_mathematic import relu, matmul, broadcast_to, summation, reshape
-from needle.ops.ops_fused import (
-    fused_linear_relu,
-    fused_batchnorm_relu,
-    fused_linear_batchnorm,
-    fused_linear_batchnorm_relu,
-    fused_conv_batchnorm2d_relu,
-)
 import needle.init as init
 from needle.nn.nn_basic import (
     Module, Linear, ReLU, Sequential, BatchNorm1d, BatchNorm2d,
@@ -33,12 +26,12 @@ from typing import Any, List, Tuple, Optional
 try:
     from fusion_pattrern import (
         FusionPattern, LinearReLUPattern, LinearBatchNormPattern, BatchNormReLUPattern, 
-        LinearBatchNormReLUPattern, ConvBatchNorm2dReLUPattern
+        LinearBatchNormReLUPattern, ConvBatchNorm2dReLUPattern, ConvBatchNorm2dPattern
     )
 except ImportError:
     from operator_fusion.fusion_pattrern import (
         FusionPattern, LinearReLUPattern, LinearBatchNormPattern, BatchNormReLUPattern, 
-        LinearBatchNormReLUPattern, ConvBatchNorm2dReLUPattern
+        LinearBatchNormReLUPattern, ConvBatchNorm2dReLUPattern, ConvBatchNorm2dPattern
     )
 
 # ============================================================================
@@ -60,6 +53,7 @@ class OperatorFusion:
         if patterns is None:
             self.patterns = patterns = [
                 ConvBatchNorm2dReLUPattern(),  # Conv+BN+ReLU (ResNet pattern)
+                ConvBatchNorm2dPattern(),  # Conv+BN
                 LinearBatchNormReLUPattern(),  # Linear+BN+ReLU
                 LinearBatchNormPattern(),      # Linear+BN
                 LinearReLUPattern(),           # Linear+ReLU
@@ -344,132 +338,3 @@ class OperatorFusion:
                 print(f"Warning: Layer for node {node_name} not found in current model attributes")
 
 
-# ============================================================================
-# Main function to start operator fusion
-# ============================================================================
-
-def fuse_model_with_mapping(self, model: Module) -> Module:
-    """
-    执行融合并确保映射正确更新
-    """
-    # 执行常规融合
-    fused_model = self.fuse_model(model)
-    
-    # 确保 FXGraphExecutor 的映射已更新
-    if hasattr(fused_model, 'node_to_layer'):
-        self._ensure_mapping_consistency(fused_model)
-    
-    return fused_model
-
-def fuse_operators(model: Module, verbose: bool = True) -> Module:
-    """
-    Convenient function to perform operator fusion on a model
-    
-    Args:
-        model: Needle model to be fused
-        verbose: Whether to print the fusion report
-        
-    Returns:
-        Module: Fused model
-    """
-    # Pattern can be increamental added
-    # patterns = [
-    #     LinearBatchNormReLUPattern(), 
-    #     LinearBatchNormPattern(),
-    #     LinearReLUPattern(),
-    #     BatchNormReLUPattern(),
-    # ]
-    fusion_engine = OperatorFusion()
-    #fused_model = fusion_engine.fuse_model(model)
-    fused_model = fuse_model_with_mapping(fusion_engine, model)
-    
-    if verbose:
-        fusion_engine.print_fusion_report()
-    
-    return fused_model
-
-
-def get_fusion_stats(model: Module) -> dict:
-    """
-    Get fusion statistics of the model (without modifying the model)
-    
-    Args:
-        model: Needle model
-        
-    Returns:
-        dict: Dictionary containing fusion statistics
-    """
-    fusion_engine = OperatorFusion()
-    # Perform fusion on a temporary copy to get statistics
-    import copy
-    temp_model = copy.deepcopy(model)
-    fusion_engine.fuse_model(temp_model)
-    
-    return fusion_engine.get_fusion_stats()
-
-
-if __name__ == "__main__":
-    print("算子融合模块测试")
-    print("="*60)
-    
-    # Create a simple test model
-    # test_model = Sequential(
-    #     Linear(10, 20),
-    #     ReLU(),
-    #     Linear(20, 30),
-    #     BatchNorm1d(30),
-    #     ReLU(),
-    #     Linear(30, 10)
-    # )
-    # convolutional test model
-    test_model = Sequential(
-        Conv(3, 16, kernel_size=3, stride=1,
-             bias=True),
-        BatchNorm2d(16),
-        ReLU(),
-        Conv(16, 32, kernel_size=3, stride=1,
-             bias=True),
-        BatchNorm2d(32),
-        ReLU(),
-    )
-    print("原始模型")
-    print(test_model)
-    print()
-
-    # Perform fusion
-    fused_model = fuse_operators(test_model, verbose=True)
-    print("融合后模型")
-    print(fused_model)
-    # test forward pass of fused model and original model
-    x = Tensor(init.rand(5,3,32,32))
-    original_output = test_model(x)
-    fused_output = fused_model(x)
-    print()
-    print("原始模型输出:")
-    print(original_output)
-    print("融合后模型输出:")
-    print(fused_output)
-    print("输出差异 (原始 - 融合):")
-    print((original_output.numpy() - fused_output.numpy()).sum())  # should be close
-    # #test_model.eval()  # Set to eval mode for BatchNorm
-    # print("原始模型:")
-    # print(test_model)
-    # print()
-    
-    # # Perform fusion
-    # fused_model = fuse_operators(test_model, verbose=True)
-    
-    # print("融合后模型:")
-    # print(fused_model)
-
-    # # test forward pass of fused model and original model
-    # x = Tensor(init.rand(5,10))
-    # original_output = test_model(x)
-    # fused_output = fused_model(x)
-    # print()
-    # print("原始模型输出:")
-    # print(original_output)
-    # print("融合后模型输出:")
-    # print(fused_output)
-    # print("输出差异 (原始 - 融合):")
-    # print((original_output.numpy() - fused_output.numpy()).sum())  # should be close to 0
