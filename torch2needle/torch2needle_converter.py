@@ -10,7 +10,7 @@ from needle.nn.nn_transformer import MultiHeadAttention, AttentionLayer, Transfo
 from needle.nn.nn_sequence import Embedding
 import needle as nd
 
-# 尝试导入 utils，如果失败则跳过（用于独立导入时）
+# try to import utils defined in torch2needle.utils
 try:
     from utils import print_trace_grouped
 except ImportError:
@@ -38,7 +38,7 @@ def torch2needle_fx(torch_model, device=nd.cpu(), dtype="float32"):
     # this is used for weight converter
     torch_mapping_needle = {}
 
-    # 转换所有节点，而不仅仅是从输出节点开始
+    # Convert all nodes
     trace_log = []
     for node in traced.graph.nodes:
         if node.name not in node_to_layer:
@@ -58,23 +58,23 @@ def build_executable_model(torch_model, fx_graph, node_to_layer, torch_mapping_n
     """
     构建可执行的 Needle 模型
     """
-    # 特殊情况：如果模型就是一个 Sequential，直接返回它
+    # if model is built by sequential
     if isinstance(torch_model, nn.Sequential):
         return build_model_structure(torch_model, {}, torch_mapping_needle)
     
-    # 特殊情况：如果模型只有一个 Sequential 子模块
+    # if the model has only one sequential child
     children = list(torch_model.children())
     if len(children) == 1 and isinstance(children[0], nn.Sequential):
         return build_model_structure(torch_model, {}, torch_mapping_needle)
     
-    # 一般情况：创建一个执行 FX 图的包装器
+    # Create a FXGraphExecutor to wrap converted model
     class FXGraphExecutor(Module):
         def __init__(self, fx_graph, node_to_layer):
             super().__init__()
             self.fx_graph = fx_graph
             self.node_to_layer = node_to_layer
 
-            # 计算每个节点的使用次数，当对应节点的use_count变为0，可以释放其占用的内存
+            # calculate each node's use count
             self._use_count = {}
             for node in fx_graph.nodes:
                 if node.name not in self._use_count:
@@ -82,11 +82,10 @@ def build_executable_model(torch_model, fx_graph, node_to_layer, torch_mapping_n
                 for input_node in node.all_input_nodes:
                     self._use_count[input_node.name] = self._use_count.get(input_node.name, 0) + 1
             
-            # 创建从 layer 到 node_name 的反向映射，用于打印时显示引用
-            # 使用 _ 前缀使其在打印时被忽略
+            # layer to node name mapping for print debug messages
             self._layer_to_name = {}
             
-            # 去重：只为每个唯一的 layer 对象创建一个属性
+            # each layer object should have only one attribute, also for printing debug messages
             seen_layers = {}  # id(layer) -> layer_name
             layer_counter = 0
             
@@ -95,8 +94,7 @@ def build_executable_model(torch_model, fx_graph, node_to_layer, torch_mapping_n
                     continue
                     
                 layer_id = id(layer)
-                if layer_id not in seen_layers: # 如果这里只创建一个seen_layers会有问题吗？
-                    # 首次遇到这个 layer，创建属性
+                if layer_id not in seen_layers: 
                     layer_name = f"layer_{layer_counter}"
                     setattr(self, layer_name, layer)
                     seen_layers[layer_id] = layer_name
@@ -117,11 +115,11 @@ def build_executable_model(torch_model, fx_graph, node_to_layer, torch_mapping_n
             return "\n".join(lines)
         
         def _format_layer(self, layer, indent=0):
-            """格式化单个层的表示，处理 ADD/SUB 的引用"""
+            """define printing format for each layer"""
             pad = "  " * indent
             
             if isinstance(layer, (ADD, SUB)):
-                # 对于 ADD/SUB，显示 left/right 是哪个 layer
+                # for ADD and SUB, show the left and right module of these two modules
                 op_name = type(layer).__name__
                 left_ref = self._layer_to_name.get(id(layer.left), repr(layer.left))
                 right_ref = self._layer_to_name.get(id(layer.right), repr(layer.right))
@@ -132,16 +130,15 @@ def build_executable_model(torch_model, fx_graph, node_to_layer, torch_mapping_n
                 return repr(layer).replace('\n', '\n' + pad)
         
         def _consume(self, env, node_or_name):
-            """用一次后递减该值的 use_count,降到 0 时释放 env 中的值。"""
+            """if a node is used, delete use count of this node with 1, if use count of this node equals 0, delete this node"""
             name = node_or_name if isinstance(node_or_name, str) else node_or_name.name
             if name in self._use_count:
                 self._use_count[name] -= 1
                 if self._use_count[name] == 0 and name in env:
-                    # 删除以释放内存（Tensor/tuple/int 都可释放）
                     del env[name]
             
         def forward(self, *args):
-            # 执行 FX 图
+            # execute wrapped model
             env = {}
             placeholders = [node for node in self.fx_graph.nodes if node.op == "placeholder"]
             for i,n in enumerate(placeholders):
@@ -160,14 +157,12 @@ def build_executable_model(torch_model, fx_graph, node_to_layer, torch_mapping_n
                     for input_node in node.all_input_nodes:
                         self._consume(env, input_node)
                 elif node.op == "call_function":
-                    # 调用函数 - 直接对张量进行操作
-                    # 获取输入张量
                     inputs = []
                     for arg in node.args:
                         if isinstance(arg, torch.fx.Node):
                             inputs.append(env[arg.name])
                     
-                    # 根据操作类型执行
+                    # distinguish by node.target
                     if node.target == operator.add:
                         env[node.name] = inputs[0] + inputs[1]
                     elif node.target == operator.sub:
@@ -221,7 +216,7 @@ def build_executable_model(torch_model, fx_graph, node_to_layer, torch_mapping_n
                             self._consume(env, input_node)
                         continue                            
                     else:
-                        # 对于其他函数，尝试调用存储的模块
+                        # use stored layer
                         needle_layer = self.node_to_layer.get(node.name, Identity())
                         env[node.name] = needle_layer(inputs[0]) if inputs else needle_layer()
                     
@@ -231,39 +226,32 @@ def build_executable_model(torch_model, fx_graph, node_to_layer, torch_mapping_n
                             self._consume(env, arg)
                 
                 elif node.op == "call_method":
-                    # 调用方法 - 例如 tensor.mean(), tensor.size() 等
-                    # 获取输入（方法调用的对象）
+                    # use methods like tensor.size(), tensor.mean()
                     if len(node.all_input_nodes) > 0:
                         target_tensor = env[node.all_input_nodes[0].name]
                         method_name = node.target
                         
-                        # 处理常见方法
                         if method_name == "mean":
-                            # 提取 dim 参数
                             kwargs = node.kwargs if hasattr(node, 'kwargs') else {}
                             dim = kwargs.get('dim', None)
                             if dim is not None:
                                 import needle.ops as ops
                                 env[node.name] = ops.summation(target_tensor, axes=(dim,)) / target_tensor.shape[dim]
                             else:
-                                # 全局 mean
                                 import needle.ops as ops
                                 total = 1
                                 for s in target_tensor.shape:
                                     total *= s
                                 env[node.name] = ops.summation(target_tensor) / total
                         elif method_name == "size":
-                            # size() 方法 - 返回形状信息
                             if len(node.args) == 1:
                                 env[node.name] = target_tensor.shape
                             else:
                                 dim = node.args[1]
                                 env[node.name] = target_tensor.shape[dim]
                         elif method_name == "unsqueeze":
-                            # unsqueeze - 扩展维度
                             env[node.name] = target_tensor
                         else:
-                            # 其他方法，直接传递
                             env[node.name] = target_tensor
                         # decrease use_count for the target tensor
                         self._consume(env, node.all_input_nodes[0])
@@ -271,7 +259,7 @@ def build_executable_model(torch_model, fx_graph, node_to_layer, torch_mapping_n
                         env[node.name] = Identity()
                         
                 elif node.op == "output":
-                    # 输出节点
+                    # output node
                     real_output = node.args
                     while isinstance(real_output, (tuple, list)) and len(real_output) == 1:
                         real_output = real_output[0]
@@ -636,20 +624,7 @@ def convert_function_node(node, named_modules, node_to_layer, torch_mapping_need
                                         depth + 1, parent=node.name, trace_log=trace_log,device=device,dtype=dtype)
         module = SUB(left, right)
         note = "operator.sub"
-    # elif op == operator.mul:
-    #     left, trace_log = convert_node(node.args[0], named_modules, node_to_layer,
-    #                                    depth + 1, parent=node.name, trace_log=trace_log)
-    #     right, trace_log = convert_node(node.args[1], named_modules, node_to_layer,
-    #                                     depth + 1, parent=node.name, trace_log=trace_log)
-    #     module = MUL(left, right)  # 你可以定义一个 MUL 模块类似 ADD
-    #     note = "operator.mul"
-    # elif op == operator.truediv:
-    #     left, trace_log = convert_node(node.args[0], named_modules, node_to_layer,
-    #                                    depth + 1, parent=node.name, trace_log=trace_log)
-    #     right, trace_log = convert_node(node.args[1], named_modules, node_to_layer,
-    #                                     depth + 1, parent=node.name, trace_log=trace_log)
-    #     module = DIV(left, right)  # 可定义 DIV 模块
-    #     note = "operator.truediv"
+
     elif op in (operator.floordiv,operator.getitem,torch.cat,torch.nn.functional.pad):
         ## pass through new operator in Unet ##
         module = Identity()
@@ -657,16 +632,6 @@ def convert_function_node(node, named_modules, node_to_layer, torch_mapping_need
     elif op == torch.flatten:
         module = Flatten()
         note = "torch.flatten"
-    
-    # elif op == operator.getitem:
-    #     # Handle tuple/list indexing (e.g., for multi-output operations)
-    #     # Convert the input node first
-    #     _, trace_log = convert_node(node.args[0], named_modules, node_to_layer, torch_mapping_needle,
-    #                                          depth + 1, parent=node.name, trace_log=trace_log, device=device, dtype=dtype)
-    #     # For getitem, we just pass through the input module
-    #     # The actual indexing will be handled at runtime
-    #     module = GetItem(node.args[1])
-    #     note = "operator.getitem"
     
     elif op == getattr or (hasattr(__builtins__, 'getattr') and op == __builtins__.getattr):
         # Handle getattr operations (e.g., accessing module attributes)
@@ -785,12 +750,10 @@ def convert_node(node, named_modules, node_to_layer, torch_mapping_needle, depth
                                              depth + 1, parent=node.name, trace_log=trace_log,device=device,dtype=dtype)
             entry["needle_type"] = type(module).__name__
         elif isinstance(real_output, (tuple, list)) and all(isinstance(n, torch.fx.Node) for n in real_output):
-            # 多输出情况：只转换节点，不创建 Sequential
-            # 返回最后一个节点的模块（通常是主输出）
+            # if this model have multiple output 
             for n in real_output:
                 module, trace_log = convert_node(n, named_modules, node_to_layer, torch_mapping_needle,
                                                 depth + 1, parent=node.name, trace_log=trace_log,device=device,dtype=dtype)
-            # module 已经是最后一个节点的模块
             entry["needle_type"] = type(module).__name__
         else:
             module = Identity()
@@ -806,18 +769,4 @@ def convert_node(node, named_modules, node_to_layer, torch_mapping_needle, depth
     trace_log.append(entry)
     return module, trace_log
 
-
-if __name__ == "__main__":
-    print("this is test for torch2needle converter")
-    torch_model = TorchMLP_v2()
-    needle_model, trace_log, torch_mapping_needle = torch2needle_fx(torch_model)
-    print("======== Torch Structure =========")
-    print(torch_model)
-    print("======== Needle Model Structure ========")
-    print(needle_model)
-    print("======== Needle print_trace_grouped ========")
-    print_trace_grouped(trace_log)
-    print("======== Torch Mapping Needle ========\r")
-    print(torch_mapping_needle)
-    print(len(torch_mapping_needle))
 

@@ -1,14 +1,3 @@
-"""
-算子融合模块 (Operator Fusion Module)
-用于优化 Needle 模型，将连续的算子融合成单个算子以提高执行效率
-
-常见融合模式:
-1. Linear + ReLU -> LinearReLU
-2. Linear + BatchNorm1d -> LinearBatchNorm
-3. BatchNorm1d + ReLU -> BatchNormReLU
-4. 更多融合模式...
-"""
-
 import sys
 import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -153,14 +142,14 @@ class OperatorFusion:
             self._refresh_use_counts(model)
             return fused_sequential
         
-        # 检查是否是 FXGraphExecutor（通过检查是否有 layer_N 属性）
+        # sorted layer attributes in FXGraphExecutor
         layer_attrs = sorted([name for name in dir(model) if name.startswith('layer_') and name.split('_')[1].isdigit()],
                              key=lambda x: int(x.split('_')[1]))
         if layer_attrs:
-            # FXGraphExecutor 情况：提取所有 layer_N，融合它们，并替换回去
+            # extracts all layer attributes
             layers = [getattr(model, attr) for attr in layer_attrs]
             
-            # 创建临时 Sequential 进行融合
+            # use a Sequential module to include all layers
             temp_sequential = Sequential(*layers)
             fused_sequential,fusion_info = self.fuse_sequential(temp_sequential,model.training)
             
@@ -169,17 +158,17 @@ class OperatorFusion:
             self._update_fx_graph_mapping(model, layers, fusion_info)
             self._refresh_use_counts(model)
             
-            # 替换回 FXGraphExecutor
+            # replace back to FXGraphExecutor
             for i, fused_layer in enumerate(fused_sequential.modules):
                 attr_name = f"layer_{i}"
                 if hasattr(model, attr_name):
                     delattr(model, attr_name)
                 setattr(model, attr_name, fused_layer)
-                # 更新 _layer_to_name 映射
+                # update _layer_to_name mapping
                 if hasattr(model, '_layer_to_name'):
                     model._layer_to_name[id(fused_layer)] = attr_name
             
-            # 清理多余的 layer 属性
+            # clear redundant layer attributes
             for i in range(len(fused_sequential.modules), len(layers)):
                 attr_name = f"layer_{i}"
                 if hasattr(model, attr_name):
@@ -211,12 +200,11 @@ class OperatorFusion:
     
     def _update_fx_graph_mapping(self, model, original_layers, fusion_info):
         """
-        更新 FXGraphExecutor 的节点到层映射关系，确保融合后的层能正确执行
+        Update FXGraphExecutor node to layer mapping
         """
         if not hasattr(model, 'node_to_layer'):
             return
         
-        # 构建节点名称到融合层的映射
         node_mapping_updates = {}
         
         fused_idx = 0
@@ -224,18 +212,18 @@ class OperatorFusion:
         
         for info in fusion_info:
             if info["type"] == "fused":
-                # 融合层：将多个原始层映射到同一个融合层
+                # fused layer: map multiple original layers to the same fused layer
                 consumed = info["consumed"]
                 fused_module = info["fused_module"]
                 
                 for i in range(consumed): 
                     if orig_idx + i < len(original_layers):
-                        # 找到使用这个原始层的所有节点
+                        # find all nodes that use this original layer
                         for node_name, layer in model.node_to_layer.items():
                             if layer is original_layers[orig_idx + i]:
-                                if i == 0:  # 第一个层映射到融合层
+                                if i == 0:  # first matched layer maps to fused layer
                                     node_mapping_updates[node_name] = fused_module
-                                else:  # 其他被融合的层映射到Identity #TODO: Identity may be removed afterward
+                                else:  # other layers in original fused layer changes to identity() #TODO: Identity may be removed afterward
                                     node_mapping_updates[node_name] = Identity()
                                 break
                 
@@ -243,10 +231,10 @@ class OperatorFusion:
                 fused_idx += 1
                 
             elif info["type"] == "original":
-                # 原始层：一对一映射
+                # original layer: one-to-one mapping
                 if orig_idx < len(original_layers):
                     original_module = info["module"]
-                    # 找到使用这个原始层的所有节点
+                    # find the node that uses this original layer
                     for node_name, layer in model.node_to_layer.items():
                         if layer is original_layers[orig_idx]:
                             node_mapping_updates[node_name] = original_module
@@ -255,7 +243,7 @@ class OperatorFusion:
                     fused_idx += 1
                     
             elif info["type"] == "nested":
-                # 嵌套 Sequential：暂时按一对一处理，如果需要可以递归处理
+                # nested Sequential module: map original layers to nested module
                 if orig_idx < len(original_layers):
                     nested_module = info["module"]
                     for node_name, layer in model.node_to_layer.items():
@@ -264,12 +252,12 @@ class OperatorFusion:
                     orig_idx += 1
                     fused_idx += 1
         
-        # 应用更新
+        # update the node_to_layer mapping
         model.node_to_layer.update(node_mapping_updates)
     
     def _refresh_use_counts(self, model):
         """
-        融合后重新计算 FXGraphExecutor 的 _use_count 字段
+        refresh the _use_count attribute in FXGraphExecutor after fusion
         """
         if not hasattr(model,'fx_graph') or not hasattr(model,'_use_count'):
             return
@@ -316,25 +304,4 @@ class OperatorFusion:
             "pattern_counts": pattern_counts,
             "fusion_log": self.fusion_log
         }
-    def _ensure_mapping_consistency(self, model):
-        """
-        A function to ensure that the FXGraphExecutor's node_to_layer mapping is consistent with the model's current layers
-        after fusion. Use Just for test & debug.
-        """
-        if not hasattr(model, 'node_to_layer'):
-            return
-        
-        # 构建当前层属性到层的映射
-        current_layers = {}
-        for attr_name in dir(model):
-            if attr_name.startswith('layer_'):
-                layer = getattr(model, attr_name)
-                current_layers[attr_name] = layer
-        
-        # 检查 node_to_layer 中的层是否都在当前层属性中
-        for node_name, layer in model.node_to_layer.items():
-            layer_found = any(id(layer) == id(current_layer) for current_layer in current_layers.values())
-            if not layer_found:
-                print(f"Warning: Layer for node {node_name} not found in current model attributes")
-
 

@@ -119,8 +119,8 @@ def _run_pipeline_test(torch_model, input_shape,device,dtype,
         print("❌ Fusion has error!")
         return False
     
-    # Step 8: Compared fused model and non-fused model
-    print("\n【Step 8】Compared fused model and non-fused model")
+    # Step 7: Compared fused model and non-fused model
+    print("\n【Step 7】Compared fused model and non-fused model")
     diff_fusion = np.abs(needle_output_before.numpy() - needle_output_after.numpy())
     max_diff_fusion = np.max(diff_fusion)
     print(f"Max difference before and after fused: {max_diff_fusion:.2e}")
