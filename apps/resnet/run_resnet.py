@@ -51,13 +51,12 @@ def _run_pipeline_test(torch_model, input_shape,device,dtype,
     print("\n【Step 1】PyTorch model Prepare")
     torch_model.eval()
     
-    # 准备测试数据
     test_input = torch.randn(*input_shape)
     with torch.no_grad():
         torch_output = torch_model(test_input)
     
-    print(f"PyTorch model architecture:")
-    print(torch_model)
+    # print(f"PyTorch model architecture:")
+    # print(torch_model)
     print(f"PyTorch model input shape: {test_input.shape}")
     print(f"PyTorch model output shape: {torch_output.shape}")
     
